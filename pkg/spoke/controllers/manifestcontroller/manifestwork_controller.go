@@ -17,6 +17,7 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
@@ -44,8 +45,10 @@ var (
 // ManifestWorkController is to reconcile the workload resources
 // fetched from hub cluster on spoke cluster.
 type ManifestWorkController struct {
-	manifestWorkClient        workv1client.ManifestWorkInterface
-	manifestWorkLister        worklister.ManifestWorkNamespaceLister
+	spokeClusterName   string
+	manifestWorkClient workv1client.ManifestWorkInterface
+	manifestWorkLister worklister.ManifestWorkLister
+	//manifestWorkLister        worklister.ManifestWorkNamespaceLister
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
 	appliedManifestWorkLister worklister.AppliedManifestWorkLister
 	spokeDynamicClient        dynamic.Interface
@@ -65,13 +68,16 @@ type applyResult struct {
 
 // NewManifestWorkController returns a ManifestWorkController
 func NewManifestWorkController(
+	spokeClusterName string,
 	recorder events.Recorder,
 	spokeDynamicClient dynamic.Interface,
 	spokeKubeClient kubernetes.Interface,
 	spokeAPIExtensionClient apiextensionsclient.Interface,
 	manifestWorkClient workv1client.ManifestWorkInterface,
-	manifestWorkInformer workinformer.ManifestWorkInformer,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	//manifestWorkInformer workinformer.ManifestWorkInformer,
+	manifestWorkInformer cache.SharedIndexInformer,
+	//manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkLister worklister.ManifestWorkLister,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
 	appliedManifestWorkInformer workinformer.AppliedManifestWorkInformer,
 	hubHash, agentID string,
@@ -79,6 +85,7 @@ func NewManifestWorkController(
 	validator auth.ExecutorValidator) factory.Controller {
 
 	controller := &ManifestWorkController{
+		spokeClusterName:          spokeClusterName,
 		manifestWorkClient:        manifestWorkClient,
 		manifestWorkLister:        manifestWorkLister,
 		appliedManifestWorkClient: appliedManifestWorkClient,
@@ -95,7 +102,7 @@ func NewManifestWorkController(
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return accessor.GetName()
-		}, manifestWorkInformer.Informer()).
+		}, manifestWorkInformer).
 		WithFilteredEventsInformersQueueKeyFunc(
 			helper.AppliedManifestworkQueueKeyFunc(hubHash),
 			helper.AppliedManifestworkHubHashFilter(hubHash),
@@ -110,7 +117,7 @@ func (m *ManifestWorkController) sync(ctx context.Context, controllerContext fac
 	manifestWorkName := controllerContext.QueueKey()
 	klog.V(4).Infof("Reconciling ManifestWork %q", manifestWorkName)
 
-	manifestWork, err := m.manifestWorkLister.Get(manifestWorkName)
+	manifestWork, err := m.manifestWorkLister.ManifestWorks(m.spokeClusterName).Get(manifestWorkName)
 	if apierrors.IsNotFound(err) {
 		// work not found, could have been deleted, do nothing.
 		return nil
@@ -306,6 +313,8 @@ func (m *ManifestWorkController) applyOneManifest(
 		result.Error = err
 		return result
 	}
+
+	klog.Infof("----------> %v", required)
 
 	resMeta, gvr, err := helper.BuildResourceMeta(index, required, m.restMapper)
 	result.resourceMeta = resMeta

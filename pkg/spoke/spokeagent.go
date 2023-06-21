@@ -8,21 +8,25 @@ import (
 	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
 	ocmfeature "open-cluster-management.io/api/feature"
+	"open-cluster-management.io/work/pkg/client"
 	"open-cluster-management.io/work/pkg/features"
 	"open-cluster-management.io/work/pkg/helper"
 	"open-cluster-management.io/work/pkg/spoke/auth"
-	"open-cluster-management.io/work/pkg/spoke/controllers/appliedmanifestcontroller"
-	"open-cluster-management.io/work/pkg/spoke/controllers/finalizercontroller"
 	"open-cluster-management.io/work/pkg/spoke/controllers/manifestcontroller"
-	"open-cluster-management.io/work/pkg/spoke/controllers/statuscontroller"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	listersworkv1 "open-cluster-management.io/api/client/work/listers/work/v1"
+	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
@@ -79,23 +83,49 @@ func (o *WorkloadAgentOptions) AddFlags(cmd *cobra.Command) {
 // RunWorkloadAgent starts the controllers on agent to process work from hub.
 func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
 	// build hub client and informer
-	hubRestConfig, err := clientcmd.BuildConfigFromFlags("" /* leave masterurl as empty */, o.HubKubeconfigFile)
-	if err != nil {
-		return err
-	}
-	hubhash := helper.HubHash(hubRestConfig.Host)
+	// hubRestConfig, err := clientcmd.BuildConfigFromFlags("" /* leave masterurl as empty */, o.HubKubeconfigFile)
+	// if err != nil {
+	// 	return err
+	// }
+	//hubhash := helper.HubHash(hubRestConfig.Host)
+	hubhash := helper.HubHash("127.0.0.1:1883")
 
 	agentID := o.AgentID
 	if len(agentID) == 0 {
 		agentID = hubhash
 	}
 
-	hubWorkClient, err := workclientset.NewForConfig(hubRestConfig)
+	// hubWorkClient, err := workclientset.NewForConfig(hubRestConfig)
+	hubWorkClient, err := client.NewEventClient(o.SpokeClusterName)
 	if err != nil {
 		return err
 	}
 	// Only watch the cluster namespace on hub
-	workInformerFactory := workinformers.NewSharedInformerFactoryWithOptions(hubWorkClient, 5*time.Minute, workinformers.WithNamespace(o.SpokeClusterName))
+	// workInformerFactory := workinformers.NewSharedInformerFactoryWithOptions(hubWorkClient, 5*time.Minute, workinformers.WithNamespace(o.SpokeClusterName))
+
+	manifestWorkInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				// if tweakListOptions != nil {
+				// 	tweakListOptions(&options)
+				// }
+
+				return hubWorkClient.List(context.TODO(), options)
+				//return nil, nil
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				// if tweakListOptions != nil {
+				// 	tweakListOptions(&options)
+				// }
+
+				return hubWorkClient.Watch(context.TODO(), options)
+				//return nil, nil
+			},
+		},
+		&workv1.ManifestWork{},
+		5*time.Minute,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	)
 
 	// load spoke client config and create spoke clients,
 	// the work agent may not running in the spoke/managed cluster.
@@ -131,85 +161,92 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	validator := auth.NewFactory(
 		spokeRestConfig,
 		spokeKubeClient,
-		workInformerFactory.Work().V1().ManifestWorks(),
+		//workInformerFactory.Work().V1().ManifestWorks(),
+		nil,
 		o.SpokeClusterName,
 		controllerContext.EventRecorder,
 		restMapper,
 	).NewExecutorValidator(ctx, features.DefaultSpokeMutableFeatureGate.Enabled(ocmfeature.ExecutorValidatingCaches))
 
 	manifestWorkController := manifestcontroller.NewManifestWorkController(
+		o.SpokeClusterName,
 		controllerContext.EventRecorder,
 		spokeDynamicClient,
 		spokeKubeClient,
 		spokeAPIExtensionClient,
-		hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-		workInformerFactory.Work().V1().ManifestWorks(),
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+		hubWorkClient,
+		manifestWorkInformer,
+		//workInformerFactory.Work().V1().ManifestWorks(),
+		//workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+		listersworkv1.NewManifestWorkLister(manifestWorkInformer.GetIndexer()),
 		spokeWorkClient.WorkV1().AppliedManifestWorks(),
 		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
 		hubhash, agentID,
 		restMapper,
 		validator,
 	)
-	addFinalizerController := finalizercontroller.NewAddFinalizerController(
-		controllerContext.EventRecorder,
-		hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-		workInformerFactory.Work().V1().ManifestWorks(),
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-	)
-	appliedManifestWorkFinalizeController := finalizercontroller.NewAppliedManifestWorkFinalizeController(
-		controllerContext.EventRecorder,
-		spokeDynamicClient,
-		spokeWorkClient.WorkV1().AppliedManifestWorks(),
-		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-		agentID,
-	)
-	manifestWorkFinalizeController := finalizercontroller.NewManifestWorkFinalizeController(
-		controllerContext.EventRecorder,
-		hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-		workInformerFactory.Work().V1().ManifestWorks(),
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-		spokeWorkClient.WorkV1().AppliedManifestWorks(),
-		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-		hubhash,
-	)
-	unmanagedAppliedManifestWorkController := finalizercontroller.NewUnManagedAppliedWorkController(
-		controllerContext.EventRecorder,
-		workInformerFactory.Work().V1().ManifestWorks(),
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-		spokeWorkClient.WorkV1().AppliedManifestWorks(),
-		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-		o.AppliedManifestWorkEvictionGracePeriod,
-		hubhash, agentID,
-	)
-	appliedManifestWorkController := appliedmanifestcontroller.NewAppliedManifestWorkController(
-		controllerContext.EventRecorder,
-		spokeDynamicClient,
-		hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-		workInformerFactory.Work().V1().ManifestWorks(),
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-		spokeWorkClient.WorkV1().AppliedManifestWorks(),
-		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-		hubhash,
-	)
-	availableStatusController := statuscontroller.NewAvailableStatusController(
-		controllerContext.EventRecorder,
-		spokeDynamicClient,
-		hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-		workInformerFactory.Work().V1().ManifestWorks(),
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-		o.StatusSyncInterval,
-	)
+	// addFinalizerController := finalizercontroller.NewAddFinalizerController(
+	// 	controllerContext.EventRecorder,
+	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
+	// 	workInformerFactory.Work().V1().ManifestWorks(),
+	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+	// )
+	// appliedManifestWorkFinalizeController := finalizercontroller.NewAppliedManifestWorkFinalizeController(
+	// 	controllerContext.EventRecorder,
+	// 	spokeDynamicClient,
+	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
+	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+	// 	agentID,
+	// )
+	// manifestWorkFinalizeController := finalizercontroller.NewManifestWorkFinalizeController(
+	// 	controllerContext.EventRecorder,
+	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
+	// 	workInformerFactory.Work().V1().ManifestWorks(),
+	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
+	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+	// 	hubhash,
+	// )
+	// unmanagedAppliedManifestWorkController := finalizercontroller.NewUnManagedAppliedWorkController(
+	// 	controllerContext.EventRecorder,
+	// 	workInformerFactory.Work().V1().ManifestWorks(),
+	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
+	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+	// 	o.AppliedManifestWorkEvictionGracePeriod,
+	// 	hubhash, agentID,
+	// )
+	// appliedManifestWorkController := appliedmanifestcontroller.NewAppliedManifestWorkController(
+	// 	controllerContext.EventRecorder,
+	// 	spokeDynamicClient,
+	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
+	// 	workInformerFactory.Work().V1().ManifestWorks(),
+	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
+	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+	// 	hubhash,
+	// )
+	// availableStatusController := statuscontroller.NewAvailableStatusController(
+	// 	controllerContext.EventRecorder,
+	// 	spokeDynamicClient,
+	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
+	// 	workInformerFactory.Work().V1().ManifestWorks(),
+	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
+	// 	o.StatusSyncInterval,
+	// )
 
-	go workInformerFactory.Start(ctx.Done())
+	//go workInformerFactory.Start(ctx.Done())
 	go spokeWorkInformerFactory.Start(ctx.Done())
-	go addFinalizerController.Run(ctx, 1)
-	go appliedManifestWorkFinalizeController.Run(ctx, appliedManifestWorkFinalizeControllerWorkers)
-	go unmanagedAppliedManifestWorkController.Run(ctx, 1)
-	go appliedManifestWorkController.Run(ctx, 1)
+
+	go manifestWorkInformer.Run(ctx.Done())
+
 	go manifestWorkController.Run(ctx, 1)
-	go manifestWorkFinalizeController.Run(ctx, manifestWorkFinalizeControllerWorkers)
-	go availableStatusController.Run(ctx, availableStatusControllerWorkers)
+	//go addFinalizerController.Run(ctx, 1)
+	//go appliedManifestWorkFinalizeController.Run(ctx, appliedManifestWorkFinalizeControllerWorkers)
+	//go unmanagedAppliedManifestWorkController.Run(ctx, 1)
+	//go appliedManifestWorkController.Run(ctx, 1)
+	//go manifestWorkFinalizeController.Run(ctx, manifestWorkFinalizeControllerWorkers)
+	//go availableStatusController.Run(ctx, availableStatusControllerWorkers)
 	<-ctx.Done()
 	return nil
 }

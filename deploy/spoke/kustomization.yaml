@@ -13,7 +13,7 @@ resources:
 - ./clusterrole_binding.yaml
 - ./clusterrole_binding_execution.yaml
 - ./clusterrole_binding_execution-admin.yaml
-- ./deployment.yaml
+#- ./deployment.yaml
 
 images:
 - name: quay.io/open-cluster-management/work:latest
