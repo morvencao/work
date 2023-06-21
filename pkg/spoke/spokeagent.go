@@ -8,25 +8,20 @@ import (
 	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
 	ocmfeature "open-cluster-management.io/api/feature"
-	"open-cluster-management.io/work/pkg/client"
+	"open-cluster-management.io/work/pkg/clients"
+	"open-cluster-management.io/work/pkg/clients/mqtt"
 	"open-cluster-management.io/work/pkg/features"
-	"open-cluster-management.io/work/pkg/helper"
 	"open-cluster-management.io/work/pkg/spoke/auth"
+	"open-cluster-management.io/work/pkg/spoke/controllers/finalizercontroller"
 	"open-cluster-management.io/work/pkg/spoke/controllers/manifestcontroller"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	listersworkv1 "open-cluster-management.io/api/client/work/listers/work/v1"
-	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
@@ -52,6 +47,8 @@ type WorkloadAgentOptions struct {
 	StatusSyncInterval                     time.Duration
 	AppliedManifestWorkEvictionGracePeriod time.Duration
 	QPS                                    float32
+
+	mqttOptions *mqtt.MQTTClientOptions
 }
 
 // NewWorkloadAgentOptions returns the flags with default value set
@@ -61,6 +58,7 @@ func NewWorkloadAgentOptions() *WorkloadAgentOptions {
 		Burst:                                  100,
 		StatusSyncInterval:                     10 * time.Second,
 		AppliedManifestWorkEvictionGracePeriod: 10 * time.Minute,
+		mqttOptions:                            mqtt.NewMQTTClientOptions(),
 	}
 }
 
@@ -78,54 +76,30 @@ func (o *WorkloadAgentOptions) AddFlags(cmd *cobra.Command) {
 	flags.IntVar(&o.Burst, "spoke-kube-api-burst", o.Burst, "Burst to use while talking with apiserver on spoke cluster.")
 	flags.DurationVar(&o.StatusSyncInterval, "status-sync-interval", o.StatusSyncInterval, "Interval to sync resource status to hub.")
 	flags.DurationVar(&o.AppliedManifestWorkEvictionGracePeriod, "appliedmanifestwork-eviction-grace-period", o.AppliedManifestWorkEvictionGracePeriod, "Grace period for appliedmanifestwork eviction")
+
+	o.mqttOptions.AddFlags(flags)
 }
 
 // RunWorkloadAgent starts the controllers on agent to process work from hub.
 func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
 	// build hub client and informer
-	// hubRestConfig, err := clientcmd.BuildConfigFromFlags("" /* leave masterurl as empty */, o.HubKubeconfigFile)
-	// if err != nil {
-	// 	return err
-	// }
-	//hubhash := helper.HubHash(hubRestConfig.Host)
-	hubhash := helper.HubHash("127.0.0.1:1883")
+	hubWorkClientBuilder := clients.NewEventClientBuilder(o.SpokeClusterName).
+		WithHubKubeconfigFile(o.HubKubeconfigFile).
+		WithMQTTOptions(o.mqttOptions)
+	hubWorkClientHolder, err := hubWorkClientBuilder.NewHubWorkClient()
+	if err != nil {
+		return err
+	}
+
+	hubWorkClient := hubWorkClientHolder.GetClinet()
+	hubWorkInformer := hubWorkClientHolder.GetInformer()
+	hubWorkLister := hubWorkClientHolder.GetLister()
+	hubhash := hubWorkClientHolder.GetHubHash()
 
 	agentID := o.AgentID
 	if len(agentID) == 0 {
 		agentID = hubhash
 	}
-
-	// hubWorkClient, err := workclientset.NewForConfig(hubRestConfig)
-	hubWorkClient, err := client.NewEventClient(o.SpokeClusterName)
-	if err != nil {
-		return err
-	}
-	// Only watch the cluster namespace on hub
-	// workInformerFactory := workinformers.NewSharedInformerFactoryWithOptions(hubWorkClient, 5*time.Minute, workinformers.WithNamespace(o.SpokeClusterName))
-
-	manifestWorkInformer := cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				// if tweakListOptions != nil {
-				// 	tweakListOptions(&options)
-				// }
-
-				return hubWorkClient.List(context.TODO(), options)
-				//return nil, nil
-			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				// if tweakListOptions != nil {
-				// 	tweakListOptions(&options)
-				// }
-
-				return hubWorkClient.Watch(context.TODO(), options)
-				//return nil, nil
-			},
-		},
-		&workv1.ManifestWork{},
-		5*time.Minute,
-		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-	)
 
 	// load spoke client config and create spoke clients,
 	// the work agent may not running in the spoke/managed cluster.
@@ -161,8 +135,8 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	validator := auth.NewFactory(
 		spokeRestConfig,
 		spokeKubeClient,
-		//workInformerFactory.Work().V1().ManifestWorks(),
-		nil,
+		hubWorkInformer,
+		hubWorkLister,
 		o.SpokeClusterName,
 		controllerContext.EventRecorder,
 		restMapper,
@@ -175,22 +149,23 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 		spokeKubeClient,
 		spokeAPIExtensionClient,
 		hubWorkClient,
-		manifestWorkInformer,
-		//workInformerFactory.Work().V1().ManifestWorks(),
-		//workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-		listersworkv1.NewManifestWorkLister(manifestWorkInformer.GetIndexer()),
+		hubWorkInformer,
+		hubWorkLister,
 		spokeWorkClient.WorkV1().AppliedManifestWorks(),
 		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
 		hubhash, agentID,
 		restMapper,
 		validator,
 	)
-	// addFinalizerController := finalizercontroller.NewAddFinalizerController(
-	// 	controllerContext.EventRecorder,
-	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-	// 	workInformerFactory.Work().V1().ManifestWorks(),
-	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-	// )
+
+	addFinalizerController := finalizercontroller.NewAddFinalizerController(
+		controllerContext.EventRecorder,
+		hubWorkClient,
+		hubWorkInformer,
+		hubWorkLister,
+		o.SpokeClusterName,
+	)
+
 	// appliedManifestWorkFinalizeController := finalizercontroller.NewAppliedManifestWorkFinalizeController(
 	// 	controllerContext.EventRecorder,
 	// 	spokeDynamicClient,
@@ -235,13 +210,11 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	// 	o.StatusSyncInterval,
 	// )
 
-	//go workInformerFactory.Start(ctx.Done())
+	go hubWorkInformer.Run(ctx.Done())
 	go spokeWorkInformerFactory.Start(ctx.Done())
 
-	go manifestWorkInformer.Run(ctx.Done())
-
 	go manifestWorkController.Run(ctx, 1)
-	//go addFinalizerController.Run(ctx, 1)
+	go addFinalizerController.Run(ctx, 1)
 	//go appliedManifestWorkFinalizeController.Run(ctx, appliedManifestWorkFinalizeControllerWorkers)
 	//go unmanagedAppliedManifestWorkController.Run(ctx, 1)
 	//go appliedManifestWorkController.Run(ctx, 1)

@@ -32,7 +32,7 @@ func newExecutorCacheController(t *testing.T, ctx context.Context, clusterName s
 	workClient := fakeworkclient.NewSimpleClientset(manifestWorkObjects...)
 	workInformerFactory := workinformers.NewSharedInformerFactoryWithOptions(
 		workClient, 5*time.Minute, workinformers.WithNamespace(clusterName))
-	manifestWorkLister := workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(clusterName)
+	manifestWorkLister := workInformerFactory.Work().V1().ManifestWorks().Lister()
 	manifestWorkExecutorCachesLoader := &defaultManifestWorkExecutorCachesLoader{
 		manifestWorkLister: manifestWorkLister,
 		restMapper:         spoketesting.NewFakeRestMapper(),

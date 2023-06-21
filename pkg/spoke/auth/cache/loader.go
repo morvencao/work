@@ -22,15 +22,16 @@ type manifestWorkExecutorCachesLoader interface {
 }
 
 type defaultManifestWorkExecutorCachesLoader struct {
-	manifestWorkLister worklister.ManifestWorkNamespaceLister
+	manifestWorkLister worklister.ManifestWorkLister
 	restMapper         meta.RESTMapper
+	clusterName        string
 }
 
 func (g *defaultManifestWorkExecutorCachesLoader) loadAllValuableCaches(retainableCache *store.ExecutorCaches) {
 	if retainableCache == nil {
 		return
 	}
-	mws, err := g.manifestWorkLister.List(labels.Everything())
+	mws, err := g.manifestWorkLister.ManifestWorks(g.clusterName).List(labels.Everything())
 	if err != nil {
 		klog.Infof("cleanup cache, list manifestworks error: %v", err)
 		return

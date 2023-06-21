@@ -31,7 +31,7 @@ func newExecutorCacheValidator(t *testing.T, ctx context.Context, clusterName st
 
 	basicValidater := basic.NewSARValidator(nil, kubeClient)
 	validator := NewExecutorCacheValidator(ctx, eventstesting.NewTestingEventRecorder(t), kubeClient,
-		workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(clusterName),
+		workInformerFactory.Work().V1().ManifestWorks().Lister(),
 		spoketesting.NewFakeRestMapper(),
 		basicValidater,
 	)

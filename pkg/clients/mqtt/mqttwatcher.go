@@ -1,4 +1,4 @@
-package client
+package mqtt
 
 import (
 	"encoding/json"
@@ -9,13 +9,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+	eclipsemqtt "github.com/eclipse/paho.mqtt.golang"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	workv1 "open-cluster-management.io/api/work/v1"
-	"open-cluster-management.io/work/pkg/spoke/controllers"
 )
 
 // Reporter hides the details of how an error is turned into a runtime.Object for
@@ -25,21 +24,22 @@ type Reporter interface {
 	AsObject(err error) runtime.Object
 }
 
-// StreamWatcher turns any stream for which you can write a Decoder interface
+// MQTTWatcher turns any stream for which you can write a Decoder interface
 // into a watch.Interface.
-type StreamWatcher struct {
+type MQTTWatcher struct {
 	sync.Mutex
 	reporter Reporter
 	result   chan watch.Event
 	done     chan struct{}
 
-	mqttClient mqtt.Client
+	mqttClient eclipsemqtt.Client
+	subTopic   string // "/v1/cluster1/+/content"
+	qos        int
 }
 
-// NewStreamWatcher creates a StreamWatcher from the given decoder.
-func NewStreamWatcher() *StreamWatcher {
-	sw := &StreamWatcher{
-		//source:   d,
+// NewMQTTWatcher creates a MQTTWatcher from the given configurations.
+func NewMQTTWatcher(mqttClient eclipsemqtt.Client, subTopic string, qos int) *MQTTWatcher {
+	sw := &MQTTWatcher{
 		reporter: errors.NewClientErrorReporter(http.StatusInternalServerError, "sub", "ClientWatchDecoding"),
 		// It's easy for a consumer to add buffering via an extra
 		// goroutine/channel, but impossible for them to remove it,
@@ -50,26 +50,23 @@ func NewStreamWatcher() *StreamWatcher {
 		// error reporting might block forever.
 		// Therefore a dedicated stop channel is used to resolve this blocking.
 		done: make(chan struct{}),
+
+		mqttClient: mqttClient,
+		subTopic:   "/v1/cluster1/+/content",
+		qos:        qos,
 	}
 
-	if sw.mqttClient == nil {
-		var err error
-		sw.mqttClient, err = ConnectToMQTT("127.0.0.1:1883")
-		if err != nil {
-			klog.Fatal(err)
-		}
-	}
 	go sw.receive()
 	return sw
 }
 
 // ResultChan implements Interface.
-func (sw *StreamWatcher) ResultChan() <-chan watch.Event {
+func (sw *MQTTWatcher) ResultChan() <-chan watch.Event {
 	return sw.result
 }
 
 // Stop implements Interface.
-func (sw *StreamWatcher) Stop() {
+func (sw *MQTTWatcher) Stop() {
 	// Call Close() exactly once by locking and setting a flag.
 	sw.Lock()
 	defer sw.Unlock()
@@ -82,13 +79,13 @@ func (sw *StreamWatcher) Stop() {
 }
 
 // receive reads result from the decoder in a loop and sends down the result channel.
-func (sw *StreamWatcher) receive() {
+func (sw *MQTTWatcher) receive() {
 	defer utilruntime.HandleCrash()
 	defer close(sw.result)
 	defer sw.Stop()
 
 	go func() {
-		token := sw.mqttClient.Subscribe("/v1/cluster1/+/content", 0, func(client mqtt.Client, msg mqtt.Message) {
+		token := sw.mqttClient.Subscribe(sw.subTopic, byte(sw.qos), func(client eclipsemqtt.Client, msg eclipsemqtt.Message) {
 			topic := msg.Topic()
 			payload := msg.Payload()
 			klog.Infof("msg from MQQT topic=%s payload=%s", topic, string(payload))
@@ -142,7 +139,7 @@ func (sw *StreamWatcher) receive() {
 // watch.Added
 // watch.Modified
 // watch.Deleted
-func (sw *StreamWatcher) decode(content any) (watch.EventType, runtime.Object, error) {
+func (sw *MQTTWatcher) decode(content any) (watch.EventType, runtime.Object, error) {
 	jsonData, err := json.Marshal(content)
 	if err != nil {
 		return watch.Error, nil, err
@@ -156,9 +153,9 @@ func (sw *StreamWatcher) decode(content any) (watch.EventType, runtime.Object, e
 	work := &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       fmt.Sprintf("%s-%s", "cluster1", "test"),
-			Namespace:  "cluster1",
-			Finalizers: []string{controllers.ManifestWorkFinalizer},
+			Name:      fmt.Sprintf("%s-%s", "cluster1", "test"),
+			Namespace: "cluster1",
+			//Finalizers: []string{controllers.ManifestWorkFinalizer},
 			// Labels: map[string]string{
 			// 	constants.KlusterletWorksLabel: "true",
 			// },
@@ -173,15 +170,4 @@ func (sw *StreamWatcher) decode(content any) (watch.EventType, runtime.Object, e
 		},
 	}
 	return watch.Added, work, nil
-}
-
-func ConnectToMQTT(mqttBrokerAddr string) (mqtt.Client, error) {
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(mqttBrokerAddr)
-
-	client := mqtt.NewClient(opts)
-	t := client.Connect()
-	<-t.Done()
-
-	return client, t.Error()
 }

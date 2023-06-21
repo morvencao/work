@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/rest"
 	k8scache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
-	workinformers "open-cluster-management.io/api/client/work/informers/externalversions/work/v1"
+	workv1lister "open-cluster-management.io/api/client/work/listers/work/v1"
 	workapiv1 "open-cluster-management.io/api/work/v1"
 
 	"open-cluster-management.io/work/pkg/spoke/auth/basic"
@@ -30,7 +30,8 @@ type ExecutorValidator interface {
 type validatorFactory struct {
 	config               *rest.Config
 	kubeClient           kubernetes.Interface
-	manifestWorkInformer workinformers.ManifestWorkInformer
+	manifestWorkInformer k8scache.SharedIndexInformer
+	manifestWorkLister   workv1lister.ManifestWorkLister
 	clusterName          string
 	recorder             events.Recorder
 	restMapper           meta.RESTMapper
@@ -39,7 +40,8 @@ type validatorFactory struct {
 func NewFactory(
 	config *rest.Config,
 	kubeClient kubernetes.Interface,
-	manifestWorkInformer workinformers.ManifestWorkInformer,
+	manifestWorkInformer k8scache.SharedIndexInformer,
+	manifestWorkLister workv1lister.ManifestWorkLister,
 	clusterName string,
 	recorder events.Recorder,
 	restMapper meta.RESTMapper) *validatorFactory {
@@ -47,6 +49,7 @@ func NewFactory(
 		config:               config,
 		kubeClient:           kubeClient,
 		manifestWorkInformer: manifestWorkInformer,
+		manifestWorkLister:   manifestWorkLister,
 		clusterName:          clusterName,
 		recorder:             recorder,
 		restMapper:           restMapper,
@@ -64,7 +67,7 @@ func (f *validatorFactory) NewExecutorValidator(ctx context.Context, isCacheVali
 		ctx,
 		f.recorder,
 		f.kubeClient,
-		f.manifestWorkInformer.Lister().ManifestWorks(f.clusterName),
+		f.manifestWorkLister,
 		f.restMapper,
 		sarValidator,
 	)
@@ -72,7 +75,7 @@ func (f *validatorFactory) NewExecutorValidator(ctx context.Context, isCacheVali
 	go func() {
 		// Wait for cache synced before starting to make sure all manifestworks could be processed
 		k8scache.WaitForNamedCacheSync("ExecutorCacheValidator", ctx.Done(),
-			f.manifestWorkInformer.Informer().HasSynced)
+			f.manifestWorkInformer.HasSynced)
 		cacheValidator.Start(ctx)
 	}()
 

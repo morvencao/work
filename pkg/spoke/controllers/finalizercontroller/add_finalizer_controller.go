@@ -2,6 +2,7 @@ package finalizercontroller
 
 import (
 	"context"
+
 	"open-cluster-management.io/work/pkg/helper"
 
 	workapiv1 "open-cluster-management.io/api/work/v1"
@@ -10,12 +11,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
-	workinformer "open-cluster-management.io/api/client/work/informers/externalversions/work/v1"
 	worklister "open-cluster-management.io/api/client/work/listers/work/v1"
 	"open-cluster-management.io/work/pkg/spoke/controllers"
 )
@@ -23,27 +24,30 @@ import (
 // AddFinalizerController is to add the cluster.open-cluster-management.io/manifest-work-cleanup finalizer to manifestworks.
 type AddFinalizerController struct {
 	manifestWorkClient workv1client.ManifestWorkInterface
-	manifestWorkLister worklister.ManifestWorkNamespaceLister
+	manifestWorkLister worklister.ManifestWorkLister
+	clusterName        string
 }
 
 // NewAddFinalizerController returns a ManifestWorkController
 func NewAddFinalizerController(
 	recorder events.Recorder,
 	manifestWorkClient workv1client.ManifestWorkInterface,
-	manifestWorkInformer workinformer.ManifestWorkInformer,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkInformer cache.SharedIndexInformer,
+	manifestWorkLister worklister.ManifestWorkLister,
+	clusterName string,
 ) factory.Controller {
 
 	controller := &AddFinalizerController{
 		manifestWorkClient: manifestWorkClient,
 		manifestWorkLister: manifestWorkLister,
+		clusterName:        clusterName,
 	}
 
 	return factory.New().
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return accessor.GetName()
-		}, manifestWorkInformer.Informer()).
+		}, manifestWorkInformer).
 		WithSync(controller.sync).ToController("ManifestWorkAddFinalizerController", recorder)
 }
 
@@ -51,7 +55,7 @@ func (m *AddFinalizerController) sync(ctx context.Context, controllerContext fac
 	manifestWorkName := controllerContext.QueueKey()
 	klog.V(4).Infof("Reconciling ManifestWork %q", manifestWorkName)
 
-	manifestWork, err := m.manifestWorkLister.Get(manifestWorkName)
+	manifestWork, err := m.manifestWorkLister.ManifestWorks(m.clusterName).Get(manifestWorkName)
 	if errors.IsNotFound(err) {
 		// work not found, could have been deleted, do nothing.
 		return nil

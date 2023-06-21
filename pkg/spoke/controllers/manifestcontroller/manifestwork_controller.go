@@ -26,8 +26,8 @@ import (
 	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/pkg/errors"
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
-	workinformer "open-cluster-management.io/api/client/work/informers/externalversions/work/v1"
-	worklister "open-cluster-management.io/api/client/work/listers/work/v1"
+	workv1informer "open-cluster-management.io/api/client/work/informers/externalversions/work/v1"
+	workv1lister "open-cluster-management.io/api/client/work/listers/work/v1"
 	workapiv1 "open-cluster-management.io/api/work/v1"
 
 	"open-cluster-management.io/work/pkg/helper"
@@ -47,10 +47,10 @@ var (
 type ManifestWorkController struct {
 	spokeClusterName   string
 	manifestWorkClient workv1client.ManifestWorkInterface
-	manifestWorkLister worklister.ManifestWorkLister
+	manifestWorkLister workv1lister.ManifestWorkLister
 	//manifestWorkLister        worklister.ManifestWorkNamespaceLister
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
-	appliedManifestWorkLister worklister.AppliedManifestWorkLister
+	appliedManifestWorkLister workv1lister.AppliedManifestWorkLister
 	spokeDynamicClient        dynamic.Interface
 	hubHash                   string
 	agentID                   string
@@ -74,12 +74,10 @@ func NewManifestWorkController(
 	spokeKubeClient kubernetes.Interface,
 	spokeAPIExtensionClient apiextensionsclient.Interface,
 	manifestWorkClient workv1client.ManifestWorkInterface,
-	//manifestWorkInformer workinformer.ManifestWorkInformer,
 	manifestWorkInformer cache.SharedIndexInformer,
-	//manifestWorkLister worklister.ManifestWorkNamespaceLister,
-	manifestWorkLister worklister.ManifestWorkLister,
+	manifestWorkLister workv1lister.ManifestWorkLister,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
-	appliedManifestWorkInformer workinformer.AppliedManifestWorkInformer,
+	appliedManifestWorkInformer workv1informer.AppliedManifestWorkInformer,
 	hubHash, agentID string,
 	restMapper meta.RESTMapper,
 	validator auth.ExecutorValidator) factory.Controller {

@@ -44,7 +44,7 @@ func NewExecutorCacheValidator(
 	ctx context.Context,
 	recorder events.Recorder,
 	spokeKubeClient kubernetes.Interface,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkLister worklister.ManifestWorkLister,
 	restMapper meta.RESTMapper,
 	validator *basic.SarValidator,
 ) *sarCacheValidator {
