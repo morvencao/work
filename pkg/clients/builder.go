@@ -16,7 +16,10 @@ import (
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
 	workv1lister "open-cluster-management.io/api/client/work/listers/work/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
-	"open-cluster-management.io/work/pkg/clients/mqtt"
+	"open-cluster-management.io/work/pkg/clients/decoder"
+	"open-cluster-management.io/work/pkg/clients/mqclients/mqtt"
+	"open-cluster-management.io/work/pkg/clients/watcher"
+	"open-cluster-management.io/work/pkg/clients/workclient"
 	"open-cluster-management.io/work/pkg/helper"
 )
 
@@ -51,7 +54,7 @@ type HubWorkClientBuilder struct {
 	mqttOptions *mqtt.MQTTClientOptions
 }
 
-func NewEventClientBuilder(clusterName string) *HubWorkClientBuilder {
+func NewHubWorkClientBuilder(clusterName string) *HubWorkClientBuilder {
 	return &HubWorkClientBuilder{
 		clusterName: clusterName,
 	}
@@ -67,19 +70,19 @@ func (b *HubWorkClientBuilder) WithMQTTOptions(options *mqtt.MQTTClientOptions) 
 	return b
 }
 
-func (b *HubWorkClientBuilder) NewHubWorkClient() (*HubWorkClient, error) {
+func (b *HubWorkClientBuilder) NewHubWorkClient(ctx context.Context) (*HubWorkClient, error) {
 	if b.hubKubeconfigFile != "" {
-		return b.newKubeClient()
+		return b.newKubeClient(ctx)
 	}
 
-	if b.mqttOptions.BrokerHost != "" {
-		return b.newMQTTClient()
+	if b.mqttOptions != nil && b.mqttOptions.BrokerHost != "" {
+		return b.newMQTTClient(ctx)
 	}
 
 	return nil, fmt.Errorf("")
 }
 
-func (b *HubWorkClientBuilder) newKubeClient() (*HubWorkClient, error) {
+func (b *HubWorkClientBuilder) newKubeClient(ctx context.Context) (*HubWorkClient, error) {
 	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", b.hubKubeconfigFile)
 	if err != nil {
 		return nil, err
@@ -97,11 +100,11 @@ func (b *HubWorkClientBuilder) newKubeClient() (*HubWorkClient, error) {
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				options.FieldSelector = fields.OneTermEqualSelector("metadata.namespace", b.clusterName).String()
-				return manifestWorkClient.List(context.TODO(), options)
+				return manifestWorkClient.List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				options.FieldSelector = fields.OneTermEqualSelector("metadata.namespace", b.clusterName).String()
-				return manifestWorkClient.Watch(context.TODO(), options)
+				return manifestWorkClient.Watch(ctx, options)
 			},
 		},
 		&workv1.ManifestWork{},
@@ -117,21 +120,27 @@ func (b *HubWorkClientBuilder) newKubeClient() (*HubWorkClient, error) {
 	}, nil
 }
 
-func (b *HubWorkClientBuilder) newMQTTClient() (*HubWorkClient, error) {
-	client, err := b.mqttOptions.GetClient(b.clusterName)
-	if err != nil {
-		return nil, fmt.Errorf("")
+func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClient, error) {
+	watcher := watcher.NewMessageQueueWatcher()
+	mqttClient := mqtt.NewMQTTClient(b.mqttOptions, b.clusterName)
+
+	if err := mqttClient.Connect(ctx); err != nil {
+		return nil, err
 	}
 
-	workClient := &EventClient{watcher: mqtt.NewMQTTWatcher(client, b.mqttOptions.IncomingTopic, b.mqttOptions.Qos)}
+	go func() {
+		mqttClient.Subscribe(ctx, &decoder.MQTTDecoder{}, watcher)
+	}()
+
+	workClient := workclient.NewMQWorkClient(mqttClient, watcher)
 
 	manifestWorkInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				return workClient.List(context.TODO(), options)
+				return workClient.List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return workClient.Watch(context.TODO(), options)
+				return workClient.Watch(ctx, options)
 			},
 		},
 		&workv1.ManifestWork{},
@@ -139,7 +148,7 @@ func (b *HubWorkClientBuilder) newMQTTClient() (*HubWorkClient, error) {
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
 
-	workClient.store = manifestWorkInformer.GetStore()
+	workClient.AddStore(manifestWorkInformer.GetStore())
 
 	return &HubWorkClient{
 		workClinet:   workClient,

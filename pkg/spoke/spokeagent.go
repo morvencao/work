@@ -5,24 +5,25 @@ import (
 	"fmt"
 	"time"
 
-	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
-	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
-	ocmfeature "open-cluster-management.io/api/feature"
-	"open-cluster-management.io/work/pkg/clients"
-	"open-cluster-management.io/work/pkg/clients/mqtt"
-	"open-cluster-management.io/work/pkg/features"
-	"open-cluster-management.io/work/pkg/spoke/auth"
-	"open-cluster-management.io/work/pkg/spoke/controllers/finalizercontroller"
-	"open-cluster-management.io/work/pkg/spoke/controllers/manifestcontroller"
-
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
+
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+
+	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
+	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
+	ocmfeature "open-cluster-management.io/api/feature"
+	"open-cluster-management.io/work/pkg/clients"
+	"open-cluster-management.io/work/pkg/clients/mqclients/mqtt"
+	"open-cluster-management.io/work/pkg/features"
+	"open-cluster-management.io/work/pkg/spoke/auth"
+	"open-cluster-management.io/work/pkg/spoke/controllers/finalizercontroller"
+	"open-cluster-management.io/work/pkg/spoke/controllers/manifestcontroller"
 )
 
 const (
@@ -83,10 +84,10 @@ func (o *WorkloadAgentOptions) AddFlags(cmd *cobra.Command) {
 // RunWorkloadAgent starts the controllers on agent to process work from hub.
 func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
 	// build hub client and informer
-	hubWorkClientBuilder := clients.NewEventClientBuilder(o.SpokeClusterName).
+	hubWorkClientBuilder := clients.NewHubWorkClientBuilder(o.SpokeClusterName).
 		WithHubKubeconfigFile(o.HubKubeconfigFile).
 		WithMQTTOptions(o.mqttOptions)
-	hubWorkClientHolder, err := hubWorkClientBuilder.NewHubWorkClient()
+	hubWorkClientHolder, err := hubWorkClientBuilder.NewHubWorkClient(ctx)
 	if err != nil {
 		return err
 	}
