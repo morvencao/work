@@ -148,8 +148,6 @@ func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClien
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
 
-	workClient.AddStore(manifestWorkInformer.GetStore())
-
 	return &HubWorkClient{
 		workClinet:   workClient,
 		workInformer: manifestWorkInformer,

@@ -45,18 +45,17 @@ var (
 // ManifestWorkController is to reconcile the workload resources
 // fetched from hub cluster on spoke cluster.
 type ManifestWorkController struct {
-	spokeClusterName   string
-	manifestWorkClient workv1client.ManifestWorkInterface
-	manifestWorkLister workv1lister.ManifestWorkLister
-	//manifestWorkLister        worklister.ManifestWorkNamespaceLister
+	manifestWorkClient        workv1client.ManifestWorkInterface
+	manifestWorkLister        workv1lister.ManifestWorkLister
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
 	appliedManifestWorkLister workv1lister.AppliedManifestWorkLister
 	spokeDynamicClient        dynamic.Interface
-	hubHash                   string
-	agentID                   string
 	restMapper                meta.RESTMapper
 	appliers                  *apply.Appliers
 	validator                 auth.ExecutorValidator
+	spokeClusterName          string
+	hubHash                   string
+	agentID                   string
 }
 
 type applyResult struct {
@@ -68,7 +67,6 @@ type applyResult struct {
 
 // NewManifestWorkController returns a ManifestWorkController
 func NewManifestWorkController(
-	spokeClusterName string,
 	recorder events.Recorder,
 	spokeDynamicClient dynamic.Interface,
 	spokeKubeClient kubernetes.Interface,
@@ -78,9 +76,9 @@ func NewManifestWorkController(
 	manifestWorkLister workv1lister.ManifestWorkLister,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
 	appliedManifestWorkInformer workv1informer.AppliedManifestWorkInformer,
-	hubHash, agentID string,
 	restMapper meta.RESTMapper,
-	validator auth.ExecutorValidator) factory.Controller {
+	validator auth.ExecutorValidator,
+	spokeClusterName, hubHash, agentID string) factory.Controller {
 
 	controller := &ManifestWorkController{
 		spokeClusterName:          spokeClusterName,

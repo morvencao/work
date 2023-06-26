@@ -41,12 +41,13 @@ func newController(t *testing.T, work *workapiv1.ManifestWork, appliedWork *work
 	workInformerFactory := workinformers.NewSharedInformerFactoryWithOptions(fakeWorkClient, 5*time.Minute, workinformers.WithNamespace("cluster1"))
 	spokeKubeClient := fakekube.NewSimpleClientset()
 	controller := &ManifestWorkController{
-		manifestWorkClient: fakeWorkClient.WorkV1().ManifestWorks("cluster1"),
-		//manifestWorkLister:        workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks("cluster1"),
+		manifestWorkClient:        fakeWorkClient.WorkV1().ManifestWorks("cluster1"),
+		manifestWorkLister:        workInformerFactory.Work().V1().ManifestWorks().Lister(),
 		appliedManifestWorkClient: fakeWorkClient.WorkV1().AppliedManifestWorks(),
 		appliedManifestWorkLister: workInformerFactory.Work().V1().AppliedManifestWorks().Lister(),
 		restMapper:                mapper,
 		validator:                 basic.NewSARValidator(nil, spokeKubeClient),
+		spokeClusterName:          "cluster1",
 	}
 
 	if err := workInformerFactory.Work().V1().ManifestWorks().Informer().GetStore().Add(work); err != nil {

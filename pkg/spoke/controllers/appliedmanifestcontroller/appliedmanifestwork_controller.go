@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -30,12 +31,13 @@ import (
 // manifestwork and delete any resouce which is no longer maintained by the manifestwork
 type AppliedManifestWorkController struct {
 	manifestWorkClient        workv1client.ManifestWorkInterface
-	manifestWorkLister        worklister.ManifestWorkNamespaceLister
+	manifestWorkLister        worklister.ManifestWorkLister
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
 	appliedManifestWorkLister worklister.AppliedManifestWorkLister
 	spokeDynamicClient        dynamic.Interface
-	hubHash                   string
 	rateLimiter               workqueue.RateLimiter
+	spokeClusterName          string
+	hubHash                   string
 }
 
 // NewAppliedManifestWorkController returns a AppliedManifestWorkController
@@ -43,11 +45,11 @@ func NewAppliedManifestWorkController(
 	recorder events.Recorder,
 	spokeDynamicClient dynamic.Interface,
 	manifestWorkClient workv1client.ManifestWorkInterface,
-	manifestWorkInformer workinformer.ManifestWorkInformer,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkInformer cache.SharedIndexInformer,
+	manifestWorkLister worklister.ManifestWorkLister,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
 	appliedManifestWorkInformer workinformer.AppliedManifestWorkInformer,
-	hubHash string) factory.Controller {
+	spokeClusterName, hubHash string) factory.Controller {
 
 	controller := &AppliedManifestWorkController{
 		manifestWorkClient:        manifestWorkClient,
@@ -56,6 +58,7 @@ func NewAppliedManifestWorkController(
 		appliedManifestWorkLister: appliedManifestWorkInformer.Lister(),
 		spokeDynamicClient:        spokeDynamicClient,
 		hubHash:                   hubHash,
+		spokeClusterName:          spokeClusterName,
 		rateLimiter:               workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
 	}
 
@@ -63,7 +66,7 @@ func NewAppliedManifestWorkController(
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return accessor.GetName()
-		}, manifestWorkInformer.Informer()).
+		}, manifestWorkInformer).
 		WithFilteredEventsInformersQueueKeyFunc(
 			helper.AppliedManifestworkQueueKeyFunc(hubHash),
 			helper.AppliedManifestworkHubHashFilter(hubHash),
@@ -75,7 +78,7 @@ func (m *AppliedManifestWorkController) sync(ctx context.Context, controllerCont
 	manifestWorkName := controllerContext.QueueKey()
 	klog.V(4).Infof("Reconciling ManifestWork %q", manifestWorkName)
 
-	manifestWork, err := m.manifestWorkLister.Get(manifestWorkName)
+	manifestWork, err := m.manifestWorkLister.ManifestWorks(m.spokeClusterName).Get(manifestWorkName)
 	if errors.IsNotFound(err) {
 		// work not found, could have been deleted, do nothing.
 		return nil

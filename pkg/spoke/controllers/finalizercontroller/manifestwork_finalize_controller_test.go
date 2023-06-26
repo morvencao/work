@@ -207,11 +207,12 @@ func TestSyncManifestWorkController(t *testing.T) {
 			}
 			controller := &ManifestWorkFinalizeController{
 				manifestWorkClient:        fakeClient.WorkV1().ManifestWorks("cluster1"),
-				manifestWorkLister:        informerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks("cluster1"),
+				manifestWorkLister:        informerFactory.Work().V1().ManifestWorks().Lister(),
 				appliedManifestWorkClient: fakeClient.WorkV1().AppliedManifestWorks(),
 				appliedManifestWorkLister: informerFactory.Work().V1().AppliedManifestWorks().Lister(),
 				hubHash:                   hubHash,
 				rateLimiter:               workqueue.NewItemExponentialFailureRateLimiter(0, 1*time.Second),
+				spokeClusterName:          "cluster1",
 			}
 
 			controllerContext := spoketesting.NewFakeSyncContext(t, c.workName)

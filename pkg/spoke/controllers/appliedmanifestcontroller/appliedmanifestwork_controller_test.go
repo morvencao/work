@@ -209,12 +209,13 @@ func TestSyncManifestWork(t *testing.T) {
 
 			controller := AppliedManifestWorkController{
 				manifestWorkClient:        fakeClient.WorkV1().ManifestWorks(testingWork.Namespace),
-				manifestWorkLister:        informerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks("cluster1"),
+				manifestWorkLister:        informerFactory.Work().V1().ManifestWorks().Lister(),
 				appliedManifestWorkClient: fakeClient.WorkV1().AppliedManifestWorks(),
 				appliedManifestWorkLister: informerFactory.Work().V1().AppliedManifestWorks().Lister(),
 				spokeDynamicClient:        fakeDynamicClient,
 				hubHash:                   "test",
 				rateLimiter:               workqueue.NewItemExponentialFailureRateLimiter(0, 1*time.Second),
+				spokeClusterName:          "cluster1",
 			}
 
 			controllerContext := spoketesting.NewFakeSyncContext(t, testingWork.Name)

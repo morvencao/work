@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
@@ -23,21 +24,22 @@ import (
 // ManifestWorkFinalizeController handles cleanup of manifestwork resources before deletion is allowed.
 type ManifestWorkFinalizeController struct {
 	manifestWorkClient        workv1client.ManifestWorkInterface
-	manifestWorkLister        worklister.ManifestWorkNamespaceLister
+	manifestWorkLister        worklister.ManifestWorkLister
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
 	appliedManifestWorkLister worklister.AppliedManifestWorkLister
-	hubHash                   string
 	rateLimiter               workqueue.RateLimiter
+	spokeClusterName          string
+	hubHash                   string
 }
 
 func NewManifestWorkFinalizeController(
 	recorder events.Recorder,
 	manifestWorkClient workv1client.ManifestWorkInterface,
-	manifestWorkInformer workinformer.ManifestWorkInformer,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkInformer cache.SharedIndexInformer,
+	manifestWorkLister worklister.ManifestWorkLister,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
 	appliedManifestWorkInformer workinformer.AppliedManifestWorkInformer,
-	hubHash string,
+	spokeClusterName, hubHash string,
 ) factory.Controller {
 
 	controller := &ManifestWorkFinalizeController{
@@ -45,15 +47,16 @@ func NewManifestWorkFinalizeController(
 		manifestWorkLister:        manifestWorkLister,
 		appliedManifestWorkClient: appliedManifestWorkClient,
 		appliedManifestWorkLister: appliedManifestWorkInformer.Lister(),
-		hubHash:                   hubHash,
 		rateLimiter:               workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
+		spokeClusterName:          spokeClusterName,
+		hubHash:                   hubHash,
 	}
 
 	return factory.New().
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return accessor.GetName()
-		}, manifestWorkInformer.Informer()).
+		}, manifestWorkInformer).
 		WithFilteredEventsInformersQueueKeyFunc(
 			helper.AppliedManifestworkQueueKeyFunc(hubHash),
 			helper.AppliedManifestworkHubHashFilter(hubHash),
@@ -66,7 +69,7 @@ func (m *ManifestWorkFinalizeController) sync(ctx context.Context, controllerCon
 	appliedManifestWorkName := fmt.Sprintf("%s-%s", m.hubHash, manifestWorkName)
 	klog.V(4).Infof("Reconciling ManifestWork %q", manifestWorkName)
 
-	manifestWork, err := m.manifestWorkLister.Get(manifestWorkName)
+	manifestWork, err := m.manifestWorkLister.ManifestWorks(m.spokeClusterName).Get(manifestWorkName)
 
 	// Delete appliedmanifestwork if relating manfiestwork is being deleted
 	switch {

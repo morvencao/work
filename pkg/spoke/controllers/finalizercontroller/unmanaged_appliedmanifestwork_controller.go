@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
@@ -25,13 +26,14 @@ import (
 )
 
 type unmanagedAppliedWorkController struct {
-	manifestWorkLister        worklister.ManifestWorkNamespaceLister
+	manifestWorkLister        worklister.ManifestWorkLister
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface
 	appliedManifestWorkLister worklister.AppliedManifestWorkLister
-	hubHash                   string
-	agentID                   string
 	evictionGracePeriod       time.Duration
 	rateLimiter               workqueue.RateLimiter
+	spokeClusterName          string
+	hubHash                   string
+	agentID                   string
 }
 
 // NewUnManagedAppliedWorkController returns a controller to evict the unmanaged appliedmanifestworks.
@@ -45,17 +47,18 @@ type unmanagedAppliedWorkController struct {
 // resources will also be evicted from the managed cluster with Kubernetes garbage collection.
 func NewUnManagedAppliedWorkController(
 	recorder events.Recorder,
-	manifestWorkInformer workinformer.ManifestWorkInformer,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkInformer cache.SharedIndexInformer,
+	manifestWorkLister worklister.ManifestWorkLister,
 	appliedManifestWorkClient workv1client.AppliedManifestWorkInterface,
 	appliedManifestWorkInformer workinformer.AppliedManifestWorkInformer,
 	evictionGracePeriod time.Duration,
-	hubHash, agentID string,
+	spokeClusterName, hubHash, agentID string,
 ) factory.Controller {
 	controller := &unmanagedAppliedWorkController{
 		manifestWorkLister:        manifestWorkLister,
 		appliedManifestWorkClient: appliedManifestWorkClient,
 		appliedManifestWorkLister: appliedManifestWorkInformer.Lister(),
+		spokeClusterName:          spokeClusterName,
 		hubHash:                   hubHash,
 		agentID:                   agentID,
 		evictionGracePeriod:       evictionGracePeriod,
@@ -66,7 +69,7 @@ func NewUnManagedAppliedWorkController(
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return fmt.Sprintf("%s-%s", hubHash, accessor.GetName())
-		}, manifestWorkInformer.Informer()).
+		}, manifestWorkInformer).
 		WithFilteredEventsInformersQueueKeyFunc(
 			func(obj runtime.Object) string {
 				accessor, _ := meta.Accessor(obj)
@@ -88,7 +91,7 @@ func (m *unmanagedAppliedWorkController) sync(ctx context.Context, controllerCon
 		return err
 	}
 
-	_, err = m.manifestWorkLister.Get(appliedManifestWork.Spec.ManifestWorkName)
+	_, err = m.manifestWorkLister.ManifestWorks(m.spokeClusterName).Get(appliedManifestWork.Spec.ManifestWorkName)
 	if errors.IsNotFound(err) {
 		// evict the current appliedmanifestwork when its relating manifestwork is missing on the hub
 		return m.evictAppliedManifestWork(ctx, controllerContext, appliedManifestWork)

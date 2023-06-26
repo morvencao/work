@@ -3,55 +3,53 @@ package decoder
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"strconv"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
+	"k8s.io/apimachinery/pkg/types"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
 
 	workv1 "open-cluster-management.io/api/work/v1"
-	"open-cluster-management.io/work/pkg/spoke/controllers"
 )
 
 type Decoder interface {
-	Decode(data []byte) watch.Event
+	Decode(data []byte) (*workv1.ManifestWork, error)
 }
 
 type MQTTDecoder struct{}
 
-// TODO:
-// resourceVersion := meta.GetResourceVersion()
-// watch.Added
-// watch.Modified
-// watch.Deleted
-func (d *MQTTDecoder) Decode(data []byte) watch.Event {
-	reporter := errors.NewClientErrorReporter(http.StatusInternalServerError, "sub", "ClientWatchDecoding")
+// playload format: {resourceID:<uuid>,maestroGeneration:<generation>,content:<content>}
+func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
+	//reporter := errors.NewClientErrorReporter(http.StatusInternalServerError, "sub", "ClientWatchDecoding")
 	payload := map[string]any{}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		klog.Errorf("failed to unmarshal payload %s, %v", string(data), err)
-		return watch.Event{
-			Type:   watch.Error,
-			Object: reporter.AsObject(fmt.Errorf("unable to decode an event from the watch stream: %v", err)),
-		}
+		return nil, fmt.Errorf("failed to unmarshal payload, %v", err)
+	}
+
+	resourceID, ok := payload["resourceID"]
+	if !ok {
+		return nil, fmt.Errorf("failed to find resourceID from payload")
+	}
+
+	maestroGeneration, ok := payload["maestroGeneration"]
+	if !ok {
+		return nil, fmt.Errorf("failed to find maestroGeneration from payload")
+	}
+
+	generation, err := strconv.ParseInt(fmt.Sprintf("%v", maestroGeneration), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("faild to parse maestroGeneration from payload, %v", err)
 	}
 
 	content, ok := payload["content"]
 	if !ok {
-		return watch.Event{
-			Type:   watch.Error,
-			Object: reporter.AsObject(fmt.Errorf("unable to decode an event from the watch stream")),
-		}
+		return nil, fmt.Errorf("failed to find content from payload")
 	}
 
 	jsonData, err := json.Marshal(content)
 	if err != nil {
-		return watch.Event{
-			Type:   watch.Error,
-			Object: reporter.AsObject(fmt.Errorf("unable to decode an event from the watch stream")),
-		}
+		return nil, fmt.Errorf("failed to marshal content, %v", err)
 	}
 
 	manifests := []workv1.Manifest{}
@@ -59,15 +57,14 @@ func (d *MQTTDecoder) Decode(data []byte) watch.Event {
 		RawExtension: runtime.RawExtension{Raw: jsonData},
 	})
 
-	work := &workv1.ManifestWork{
+	return &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       fmt.Sprintf("%s-%s", "cluster1", "test"),
 			Namespace:  "cluster1",
-			Finalizers: []string{controllers.ManifestWorkFinalizer},
-			// Labels: map[string]string{
-			// 	constants.KlusterletWorksLabel: "true",
-			// },
+			UID:        types.UID(fmt.Sprintf("%s", resourceID)),
+			Generation: generation,
+			//Finalizers: []string{controllers.ManifestWorkFinalizer},
 		},
 		Spec: workv1.ManifestWorkSpec{
 			Workload: workv1.ManifestsTemplate{
@@ -77,9 +74,5 @@ func (d *MQTTDecoder) Decode(data []byte) watch.Event {
 				PropagationPolicy: workv1.DeletePropagationPolicyTypeOrphan,
 			},
 		},
-	}
-	return watch.Event{
-		Type:   watch.Added,
-		Object: work,
-	}
+	}, nil
 }

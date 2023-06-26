@@ -3,8 +3,9 @@ package statuscontroller
 import (
 	"context"
 	"fmt"
-	"open-cluster-management.io/work/pkg/spoke/controllers"
 	"time"
+
+	"open-cluster-management.io/work/pkg/spoke/controllers"
 
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -18,9 +19,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
-	workinformer "open-cluster-management.io/api/client/work/informers/externalversions/work/v1"
 	worklister "open-cluster-management.io/api/client/work/listers/work/v1"
 	workapiv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/work/pkg/helper"
@@ -35,9 +36,10 @@ const statusFeedbackConditionType = "StatusFeedbackSynced"
 // and status update call to hub apiserver.
 type AvailableStatusController struct {
 	manifestWorkClient workv1client.ManifestWorkInterface
-	manifestWorkLister worklister.ManifestWorkNamespaceLister
+	manifestWorkLister worklister.ManifestWorkLister
 	spokeDynamicClient dynamic.Interface
 	statusReader       *statusfeedback.StatusReader
+	spokeClusterName   string
 }
 
 // NewAvailableStatusController returns a AvailableStatusController
@@ -45,22 +47,24 @@ func NewAvailableStatusController(
 	recorder events.Recorder,
 	spokeDynamicClient dynamic.Interface,
 	manifestWorkClient workv1client.ManifestWorkInterface,
-	manifestWorkInformer workinformer.ManifestWorkInformer,
-	manifestWorkLister worklister.ManifestWorkNamespaceLister,
+	manifestWorkInformer cache.SharedIndexInformer,
+	manifestWorkLister worklister.ManifestWorkLister,
 	syncInterval time.Duration,
+	spokeClusterName string,
 ) factory.Controller {
 	controller := &AvailableStatusController{
 		manifestWorkClient: manifestWorkClient,
 		manifestWorkLister: manifestWorkLister,
 		spokeDynamicClient: spokeDynamicClient,
 		statusReader:       statusfeedback.NewStatusReader(),
+		spokeClusterName:   spokeClusterName,
 	}
 
 	return factory.New().
 		WithInformersQueueKeyFunc(func(obj runtime.Object) string {
 			accessor, _ := meta.Accessor(obj)
 			return accessor.GetName()
-		}, manifestWorkInformer.Informer()).
+		}, manifestWorkInformer).
 		WithSync(controller.sync).ResyncEvery(syncInterval).ToController("AvailableStatusController", recorder)
 }
 
@@ -68,7 +72,7 @@ func (c *AvailableStatusController) sync(ctx context.Context, controllerContext 
 	manifestWorkName := controllerContext.QueueKey()
 	if manifestWorkName != factory.DefaultQueueKey {
 		// sync a particular manifestwork
-		manifestWork, err := c.manifestWorkLister.Get(manifestWorkName)
+		manifestWork, err := c.manifestWorkLister.ManifestWorks(c.spokeClusterName).Get(manifestWorkName)
 		if errors.IsNotFound(err) {
 			// work not found, could have been deleted, do nothing.
 			return nil

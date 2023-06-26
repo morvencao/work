@@ -218,13 +218,14 @@ func TestSyncUnamanagedAppliedWork(t *testing.T) {
 			}
 
 			controller := &unmanagedAppliedWorkController{
-				manifestWorkLister:        informerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks("test"),
+				manifestWorkLister:        informerFactory.Work().V1().ManifestWorks().Lister(),
 				appliedManifestWorkClient: fakeClient.WorkV1().AppliedManifestWorks(),
 				appliedManifestWorkLister: informerFactory.Work().V1().AppliedManifestWorks().Lister(),
 				hubHash:                   c.hubHash,
 				agentID:                   c.agentID,
 				evictionGracePeriod:       c.evictionGracePeriod,
 				rateLimiter:               workqueue.NewItemExponentialFailureRateLimiter(0, c.evictionGracePeriod),
+				spokeClusterName:          "test",
 			}
 
 			controllerContext := spoketesting.NewFakeSyncContext(t, c.appliedManifestWorkName)

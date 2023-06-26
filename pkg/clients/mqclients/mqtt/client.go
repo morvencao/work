@@ -4,10 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
-	paho "github.com/eclipse/paho.golang/paho"
+	"github.com/eclipse/paho.golang/paho"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/klog/v2"
+
+	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/work/pkg/clients/decoder"
 	"open-cluster-management.io/work/pkg/clients/watcher"
 )
@@ -33,18 +40,23 @@ func (l *ErrorLogger) Printf(format string, v ...interface{}) {
 }
 
 type MQTTClient struct {
+	sync.Mutex
+
 	options     *MQTTClientOptions
 	msgChan     chan *paho.Publish
 	clusterName string
 
 	client *paho.Client
+
+	objGenerations map[types.UID]int64
 }
 
 func NewMQTTClient(options *MQTTClientOptions, clusterName string) *MQTTClient {
 	return &MQTTClient{
-		options:     options,
-		msgChan:     make(chan *paho.Publish),
-		clusterName: clusterName,
+		options:        options,
+		msgChan:        make(chan *paho.Publish),
+		clusterName:    clusterName,
+		objGenerations: make(map[types.UID]int64),
 	}
 }
 
@@ -128,8 +140,48 @@ func (c *MQTTClient) Subscribe(ctx context.Context, decoder decoder.Decoder, rec
 
 	for m := range c.msgChan {
 		klog.Infof("payload from MQQT %s", string(m.Payload))
-		receiver.Receive(decoder.Decode(m.Payload))
+		work, err := decoder.Decode(m.Payload)
+		if err != nil {
+			klog.Errorf("failed to decode payload %s, %v", string(m.Payload), err)
+			continue
+		}
+
+		evt := c.generateEvent(work)
+		if evt == nil {
+			continue
+		}
+
+		receiver.Receive(*evt)
 	}
 
 	return nil
+}
+
+// TODO: watch.Deleted
+func (c *MQTTClient) generateEvent(work *workv1.ManifestWork) *watch.Event {
+	c.Lock()
+	defer c.Unlock()
+
+	currentGen := work.Generation
+	lastGen, ok := c.objGenerations[work.UID]
+	if !ok {
+		// add to current map
+		c.objGenerations[work.UID] = currentGen
+		work.CreationTimestamp = metav1.Now()
+		return &watch.Event{
+			Type:   watch.Added,
+			Object: work,
+		}
+	}
+
+	if currentGen == lastGen {
+		return nil
+	}
+
+	// update current map
+	c.objGenerations[work.UID] = currentGen
+	return &watch.Event{
+		Type:   watch.Modified,
+		Object: work,
+	}
 }

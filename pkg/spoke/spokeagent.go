@@ -22,8 +22,10 @@ import (
 	"open-cluster-management.io/work/pkg/clients/mqclients/mqtt"
 	"open-cluster-management.io/work/pkg/features"
 	"open-cluster-management.io/work/pkg/spoke/auth"
+	"open-cluster-management.io/work/pkg/spoke/controllers/appliedmanifestcontroller"
 	"open-cluster-management.io/work/pkg/spoke/controllers/finalizercontroller"
 	"open-cluster-management.io/work/pkg/spoke/controllers/manifestcontroller"
+	"open-cluster-management.io/work/pkg/spoke/controllers/statuscontroller"
 )
 
 const (
@@ -144,7 +146,6 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	).NewExecutorValidator(ctx, features.DefaultSpokeMutableFeatureGate.Enabled(ocmfeature.ExecutorValidatingCaches))
 
 	manifestWorkController := manifestcontroller.NewManifestWorkController(
-		o.SpokeClusterName,
 		controllerContext.EventRecorder,
 		spokeDynamicClient,
 		spokeKubeClient,
@@ -154,9 +155,9 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 		hubWorkLister,
 		spokeWorkClient.WorkV1().AppliedManifestWorks(),
 		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-		hubhash, agentID,
 		restMapper,
 		validator,
+		o.SpokeClusterName, hubhash, agentID,
 	)
 
 	addFinalizerController := finalizercontroller.NewAddFinalizerController(
@@ -167,61 +168,69 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 		o.SpokeClusterName,
 	)
 
-	// appliedManifestWorkFinalizeController := finalizercontroller.NewAppliedManifestWorkFinalizeController(
-	// 	controllerContext.EventRecorder,
-	// 	spokeDynamicClient,
-	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
-	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-	// 	agentID,
-	// )
-	// manifestWorkFinalizeController := finalizercontroller.NewManifestWorkFinalizeController(
-	// 	controllerContext.EventRecorder,
-	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-	// 	workInformerFactory.Work().V1().ManifestWorks(),
-	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
-	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-	// 	hubhash,
-	// )
-	// unmanagedAppliedManifestWorkController := finalizercontroller.NewUnManagedAppliedWorkController(
-	// 	controllerContext.EventRecorder,
-	// 	workInformerFactory.Work().V1().ManifestWorks(),
-	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
-	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-	// 	o.AppliedManifestWorkEvictionGracePeriod,
-	// 	hubhash, agentID,
-	// )
-	// appliedManifestWorkController := appliedmanifestcontroller.NewAppliedManifestWorkController(
-	// 	controllerContext.EventRecorder,
-	// 	spokeDynamicClient,
-	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-	// 	workInformerFactory.Work().V1().ManifestWorks(),
-	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-	// 	spokeWorkClient.WorkV1().AppliedManifestWorks(),
-	// 	spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
-	// 	hubhash,
-	// )
-	// availableStatusController := statuscontroller.NewAvailableStatusController(
-	// 	controllerContext.EventRecorder,
-	// 	spokeDynamicClient,
-	// 	hubWorkClient.WorkV1().ManifestWorks(o.SpokeClusterName),
-	// 	workInformerFactory.Work().V1().ManifestWorks(),
-	// 	workInformerFactory.Work().V1().ManifestWorks().Lister().ManifestWorks(o.SpokeClusterName),
-	// 	o.StatusSyncInterval,
-	// )
+	appliedManifestWorkFinalizeController := finalizercontroller.NewAppliedManifestWorkFinalizeController(
+		controllerContext.EventRecorder,
+		spokeDynamicClient,
+		spokeWorkClient.WorkV1().AppliedManifestWorks(),
+		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+		agentID,
+	)
+
+	manifestWorkFinalizeController := finalizercontroller.NewManifestWorkFinalizeController(
+		controllerContext.EventRecorder,
+		hubWorkClient,
+		hubWorkInformer,
+		hubWorkLister,
+		spokeWorkClient.WorkV1().AppliedManifestWorks(),
+		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+		o.SpokeClusterName, hubhash,
+	)
+
+	unmanagedAppliedManifestWorkController := finalizercontroller.NewUnManagedAppliedWorkController(
+		controllerContext.EventRecorder,
+		hubWorkInformer,
+		hubWorkLister,
+		spokeWorkClient.WorkV1().AppliedManifestWorks(),
+		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+		o.AppliedManifestWorkEvictionGracePeriod,
+		o.SpokeClusterName, hubhash, agentID,
+	)
+
+	appliedManifestWorkController := appliedmanifestcontroller.NewAppliedManifestWorkController(
+		controllerContext.EventRecorder,
+		spokeDynamicClient,
+		hubWorkClient,
+		hubWorkInformer,
+		hubWorkLister,
+		spokeWorkClient.WorkV1().AppliedManifestWorks(),
+		spokeWorkInformerFactory.Work().V1().AppliedManifestWorks(),
+		o.SpokeClusterName,
+		hubhash,
+	)
+
+	availableStatusController := statuscontroller.NewAvailableStatusController(
+		controllerContext.EventRecorder,
+		spokeDynamicClient,
+		hubWorkClient,
+		hubWorkInformer,
+		hubWorkLister,
+		o.StatusSyncInterval,
+		o.SpokeClusterName,
+	)
 
 	go hubWorkInformer.Run(ctx.Done())
 	go spokeWorkInformerFactory.Start(ctx.Done())
 
 	go manifestWorkController.Run(ctx, 1)
 	go addFinalizerController.Run(ctx, 1)
-	//go appliedManifestWorkFinalizeController.Run(ctx, appliedManifestWorkFinalizeControllerWorkers)
-	//go unmanagedAppliedManifestWorkController.Run(ctx, 1)
-	//go appliedManifestWorkController.Run(ctx, 1)
-	//go manifestWorkFinalizeController.Run(ctx, manifestWorkFinalizeControllerWorkers)
-	//go availableStatusController.Run(ctx, availableStatusControllerWorkers)
+	go appliedManifestWorkFinalizeController.Run(ctx, appliedManifestWorkFinalizeControllerWorkers)
+	go unmanagedAppliedManifestWorkController.Run(ctx, 1)
+	go appliedManifestWorkController.Run(ctx, 1)
+	go manifestWorkFinalizeController.Run(ctx, manifestWorkFinalizeControllerWorkers)
+	go availableStatusController.Run(ctx, availableStatusControllerWorkers)
+
 	<-ctx.Done()
+
 	return nil
 }
 

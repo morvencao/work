@@ -2,27 +2,31 @@ package workclient
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/work/pkg/clients/mqclients"
+	"open-cluster-management.io/work/pkg/clients/watcher"
 )
 
 type MQWorkClient struct {
+	sync.Mutex
+
 	mqClient mqclients.MessageQueueClient
-	watcher  watch.Interface
-	store    cache.Store
+	watcher  watcher.Receiver
 }
 
 var _ workv1client.ManifestWorkInterface = &MQWorkClient{}
 
-func NewMQWorkClient(mqClient mqclients.MessageQueueClient, watcher watch.Interface) *MQWorkClient {
+func NewMQWorkClient(mqClient mqclients.MessageQueueClient, watcher watcher.Receiver) *MQWorkClient {
 	return &MQWorkClient{
 		mqClient: mqClient,
 		watcher:  watcher,
@@ -35,16 +39,32 @@ func (c *MQWorkClient) Create(ctx context.Context, manifestWork *workv1.Manifest
 }
 
 func (c *MQWorkClient) Update(ctx context.Context, manifestWork *workv1.ManifestWork, opts metav1.UpdateOptions) (*workv1.ManifestWork, error) {
+	c.Lock()
+	defer c.Unlock()
+
 	klog.Infof("update manifest work")
-	if err := c.store.Update(manifestWork.DeepCopy()); err != nil {
-		return nil, err
-	}
+	updatedObj := manifestWork.DeepCopy()
+	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
+	c.watcher.Receive(watch.Event{
+		Type:   watch.Modified,
+		Object: updatedObj,
+	})
 	return manifestWork, nil
 }
 
 func (c *MQWorkClient) UpdateStatus(ctx context.Context, manifestWork *workv1.ManifestWork, opts metav1.UpdateOptions) (*workv1.ManifestWork, error) {
+	c.Lock()
+	defer c.Unlock()
+
 	klog.Infof("update manifest work status")
-	//TODO:
+	//TODO: publish the status
+
+	updatedObj := manifestWork.DeepCopy()
+	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
+	c.watcher.Receive(watch.Event{
+		Type:   watch.Modified,
+		Object: updatedObj,
+	})
 	return manifestWork, nil
 }
 
@@ -77,6 +97,12 @@ func (c *MQWorkClient) Patch(ctx context.Context, name string, pt types.PatchTyp
 	return nil, nil
 }
 
-func (c *MQWorkClient) AddStore(store cache.Store) {
-	c.store = store
+func (c *MQWorkClient) addResourceVersion(resouceVersion string) string {
+	if len(resouceVersion) == 0 {
+		return fmt.Sprintf("%d", 0)
+	}
+
+	newResouceVersion, _ := strconv.ParseInt(resouceVersion, 10, 64)
+	newResouceVersion = newResouceVersion + 1
+	return fmt.Sprintf("%d", newResouceVersion)
 }

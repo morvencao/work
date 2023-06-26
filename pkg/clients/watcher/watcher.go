@@ -7,6 +7,7 @@ import (
 )
 
 type Receiver interface {
+	watch.Interface
 	Receive(evt watch.Event)
 }
 
