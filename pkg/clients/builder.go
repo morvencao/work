@@ -129,7 +129,7 @@ func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClien
 	}
 
 	go func() {
-		mqttClient.Subscribe(ctx, &decoder.MQTTDecoder{}, watcher)
+		mqttClient.Subscribe(ctx, &decoder.MQTTDecoder{ClusterName: b.clusterName}, watcher)
 	}()
 
 	workClient := workclient.NewMQWorkClient(mqttClient, watcher)

@@ -30,6 +30,7 @@ github.com/davecgh/go-spew/spew
 ## explicit; go 1.15
 github.com/eclipse/paho.golang/packets
 github.com/eclipse/paho.golang/paho
+github.com/eclipse/paho.golang/paho/extensions/rpc
 # github.com/emicklei/go-restful/v3 v3.9.0
 ## explicit; go 1.13
 github.com/emicklei/go-restful/v3

@@ -22,6 +22,8 @@ func NewMQTTClientOptions() *MQTTClientOptions {
 		ConnEstablishingRetry: 10,
 		IncomingTopic:         "/v1/cluster1/+/content",
 		IncomingQoS:           0,
+		ResponseTopic:         "/v1/shard1/cluster1/status",
+		ResponseQoS:           0,
 	}
 }
 
@@ -33,4 +35,6 @@ func (o *MQTTClientOptions) AddFlags(flags *pflag.FlagSet) {
 	flags.IntVar(&o.ConnEstablishingRetry, "mqtt-conn-establishing-retry", o.ConnEstablishingRetry, "")
 	flags.StringVar(&o.IncomingTopic, "mqtt-incoming-topic", o.IncomingTopic, "incoming topic")
 	flags.IntVar(&o.IncomingQoS, "mqtt-incoming-qos", o.IncomingQoS, "incoming Qos")
+	flags.StringVar(&o.ResponseTopic, "mqtt-response-topic", o.ResponseTopic, "response topic")
+	flags.IntVar(&o.ResponseQoS, "mqtt-response-qos", o.ResponseQoS, "response Qos")
 }

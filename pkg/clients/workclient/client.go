@@ -42,14 +42,33 @@ func (c *MQWorkClient) Update(ctx context.Context, manifestWork *workv1.Manifest
 	c.Lock()
 	defer c.Unlock()
 
-	klog.Infof("update manifest work")
 	updatedObj := manifestWork.DeepCopy()
 	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
+
+	// the manifest work is deleting and the finalizers are removed
+	if !updatedObj.DeletionTimestamp.IsZero() && len(updatedObj.Finalizers) == 0 {
+		if err := c.mqClient.Publish(ctx, manifestWork); err != nil {
+			// TODO think about how to handle this error
+			klog.Errorf("failed to update status, %v", err)
+			return manifestWork, nil
+		}
+
+		klog.Infof("delete manifest work")
+		c.watcher.Receive(watch.Event{
+			Type:   watch.Deleted,
+			Object: updatedObj,
+		})
+
+		return updatedObj, nil
+	}
+
+	klog.Infof("update manifest work")
 	c.watcher.Receive(watch.Event{
 		Type:   watch.Modified,
 		Object: updatedObj,
 	})
-	return manifestWork, nil
+
+	return updatedObj, nil
 }
 
 func (c *MQWorkClient) UpdateStatus(ctx context.Context, manifestWork *workv1.ManifestWork, opts metav1.UpdateOptions) (*workv1.ManifestWork, error) {
@@ -57,7 +76,11 @@ func (c *MQWorkClient) UpdateStatus(ctx context.Context, manifestWork *workv1.Ma
 	defer c.Unlock()
 
 	klog.Infof("update manifest work status")
-	//TODO: publish the status
+	if err := c.mqClient.Publish(ctx, manifestWork); err != nil {
+		// TODO think about how to handle this error
+		klog.Errorf("failed to update status, %v", err)
+		return manifestWork, nil
+	}
 
 	updatedObj := manifestWork.DeepCopy()
 	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
@@ -65,7 +88,8 @@ func (c *MQWorkClient) UpdateStatus(ctx context.Context, manifestWork *workv1.Ma
 		Type:   watch.Modified,
 		Object: updatedObj,
 	})
-	return manifestWork, nil
+
+	return updatedObj, nil
 }
 
 func (c *MQWorkClient) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {

@@ -6,9 +6,9 @@ import (
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 
 	workv1 "open-cluster-management.io/api/work/v1"
 )
@@ -17,11 +17,12 @@ type Decoder interface {
 	Decode(data []byte) (*workv1.ManifestWork, error)
 }
 
-type MQTTDecoder struct{}
+type MQTTDecoder struct {
+	ClusterName string
+}
 
 // playload format: {resourceID:<uuid>,maestroGeneration:<generation>,content:<content>}
 func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
-	//reporter := errors.NewClientErrorReporter(http.StatusInternalServerError, "sub", "ClientWatchDecoding")
 	payload := map[string]any{}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal payload, %v", err)
@@ -47,7 +48,34 @@ func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
 		return nil, fmt.Errorf("failed to find content from payload")
 	}
 
-	jsonData, err := json.Marshal(content)
+	unstructuredMap, ok := content.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("faild to convert content to unstructured map")
+	}
+	unstructuredObj := unstructured.Unstructured{Object: unstructuredMap}
+
+	name := fmt.Sprintf("%s-%s", d.ClusterName, unstructuredObj.GetName())
+	if unstructuredObj.GetNamespace() != "" {
+		name = fmt.Sprintf("%s-%s-%s", d.ClusterName, unstructuredObj.GetNamespace(), unstructuredObj.GetName())
+	}
+
+	work := &workv1.ManifestWork{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  d.ClusterName,
+			UID:        types.UID(fmt.Sprintf("%s", resourceID)),
+			Generation: generation,
+		},
+	}
+
+	deletionTimestamp := unstructuredObj.GetDeletionTimestamp()
+	if deletionTimestamp != nil {
+		work.DeletionTimestamp = deletionTimestamp
+		unstructuredObj.SetDeletionTimestamp(nil)
+	}
+
+	jsonData, err := json.Marshal(unstructuredObj.Object)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal content, %v", err)
 	}
@@ -57,22 +85,11 @@ func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
 		RawExtension: runtime.RawExtension{Raw: jsonData},
 	})
 
-	return &workv1.ManifestWork{
-		TypeMeta: metav1.TypeMeta{},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       fmt.Sprintf("%s-%s", "cluster1", "test"),
-			Namespace:  "cluster1",
-			UID:        types.UID(fmt.Sprintf("%s", resourceID)),
-			Generation: generation,
-			//Finalizers: []string{controllers.ManifestWorkFinalizer},
+	work.Spec = workv1.ManifestWorkSpec{
+		Workload: workv1.ManifestsTemplate{
+			Manifests: manifests,
 		},
-		Spec: workv1.ManifestWorkSpec{
-			Workload: workv1.ManifestsTemplate{
-				Manifests: manifests,
-			},
-			DeleteOption: &workv1.DeleteOption{
-				PropagationPolicy: workv1.DeletePropagationPolicyTypeOrphan,
-			},
-		},
-	}, nil
+	}
+
+	return work, nil
 }
