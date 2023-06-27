@@ -14,12 +14,13 @@ const (
 )
 
 type ManifestPayload struct {
-	ResourceID        string                             `json:"resourceID"`
-	ResourceVersion   int64                              `json:"resourceVersion"`
-	UpdateStrategy    workv1.UpdateStrategyType          `json:"updateStrategy"`
-	DeletionTimestamp metav1.Time                        `json:"deletionTimestamp"`
-	DeletePolicy      workv1.DeletePropagationPolicyType `json:"deletePolicy"`
-	Manifest          []byte                             `json:"manifest"`
+	ResourceID          string                             `json:"resourceID"`
+	ResourceVersion     int64                              `json:"resourceVersion"`
+	Manifest            []byte                             `json:"manifest"`
+	StatusFeedbackRules workv1.FeedbackRule                `json:"statusFeedbackRule"`
+	UpdateStrategy      workv1.UpdateStrategyType          `json:"updateStrategy"`
+	DeletionTimestamp   metav1.Time                        `json:"deletionTimestamp"`
+	DeletePolicy        workv1.DeletePropagationPolicyType `json:"deletePolicy"`
 }
 
 type ManifestStatus struct {

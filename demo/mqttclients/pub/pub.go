@@ -106,14 +106,6 @@ func toMsg() string {
 
 	msgs = append(msgs, fmt.Sprintf("\"resourceVersion\":\"%d\"", generation))
 
-	if len(updateStrategy) != 0 {
-		msgs = append(msgs, fmt.Sprintf("\"updateStrategy\":\"%s\"", updateStrategy))
-	}
-
-	if len(deletePolicy) != 0 {
-		msgs = append(msgs, fmt.Sprintf("\"deletePolicy\":\"%s\"", deletePolicy))
-	}
-
 	if delete {
 		now := metav1.Now()
 		msgs = append(msgs, fmt.Sprintf("\"deletionTimestamp\":\"%s\"", now.Format("2006-01-02T15:04:05Z")))
@@ -131,6 +123,16 @@ func toMsg() string {
 	}
 
 	msgs = append(msgs, fmt.Sprintf("\"manifest\":%s", manifest))
+
+	msgs = append(msgs, "\"statusFeedbackRules\":{\"type\":\"WellKnownStatus\"}")
+
+	if len(updateStrategy) != 0 {
+		msgs = append(msgs, fmt.Sprintf("\"updateStrategy\":\"%s\"", updateStrategy))
+	}
+
+	if len(deletePolicy) != 0 {
+		msgs = append(msgs, fmt.Sprintf("\"deletePolicy\":\"%s\"", deletePolicy))
+	}
 
 	return fmt.Sprintf("{%s}", strings.Join(msgs, ","))
 }
