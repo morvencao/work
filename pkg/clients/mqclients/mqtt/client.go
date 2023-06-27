@@ -158,7 +158,6 @@ func (c *MQTTClient) Subscribe(ctx context.Context, decoder decoder.Decoder, rec
 	return nil
 }
 
-// TODO: watch.Deleted
 func (c *MQTTClient) generateEvent(work *workv1.ManifestWork) *watch.Event {
 	c.Lock()
 	defer c.Unlock()
@@ -253,6 +252,7 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 	return client, nil
 }
 
+// TODO aggregate the work status for reconcile status
 func (c *MQTTClient) toStatusRequest(work *workv1.ManifestWork) []byte {
 	reconcileStatus := ReconcileStatus{
 		Status:  "False",

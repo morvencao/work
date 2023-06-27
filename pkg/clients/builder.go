@@ -128,6 +128,8 @@ func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClien
 		return nil, err
 	}
 
+	// TODO publish resync message
+
 	go func() {
 		mqttClient.Subscribe(ctx, &decoder.MQTTDecoder{ClusterName: b.clusterName}, watcher)
 	}()
