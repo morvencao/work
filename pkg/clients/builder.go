@@ -16,7 +16,6 @@ import (
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
 	workv1lister "open-cluster-management.io/api/client/work/listers/work/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
-	"open-cluster-management.io/work/pkg/clients/decoder"
 	"open-cluster-management.io/work/pkg/clients/mqclients/mqtt"
 	"open-cluster-management.io/work/pkg/clients/watcher"
 	"open-cluster-management.io/work/pkg/clients/workclient"
@@ -131,7 +130,7 @@ func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClien
 	// TODO publish resync message
 
 	go func() {
-		mqttClient.Subscribe(ctx, &decoder.MQTTDecoder{ClusterName: b.clusterName}, watcher)
+		mqttClient.Subscribe(ctx, watcher)
 	}()
 
 	workClient := workclient.NewMQWorkClient(mqttClient, watcher)

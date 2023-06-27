@@ -108,8 +108,8 @@ deploy: deploy-hub deploy-work-agent
 
 undeploy: remove-cluster-ns clean-work-agent clean-hub
 
-build-simulator:
-	go build -o simulator demo/mqttsimulator/main.go
+build-mqttclient:
+	go build -o mqttclient demo/mqttclients/main.go
 
 build-e2e:
 	go test -c ./test/e2e -mod=vendor

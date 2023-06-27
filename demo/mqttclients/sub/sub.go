@@ -13,6 +13,8 @@ import (
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/spf13/cobra"
+
+	workv1 "open-cluster-management.io/api/work/v1"
 )
 
 var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
@@ -21,20 +23,24 @@ var shutdownHandler chan os.Signal
 
 var username, password string
 var broker = "127.0.0.1:1883"
-var topic = "/v1/shard1/+/status"
+var topic = "/v1/clusters/+/status"
 
-type ReconcileStatus struct {
+type ManifestStatus struct {
+	ResourceID        string            `json:"resourceID"`
+	ResourceVersion   int64             `json:"resourceVersion"`
+	ResourceCondition ResourceCondition `json:"resourceCondition"`
+	ResourceStatus    ResourceStatus    `json:"resourceStatus"`
+}
+
+type ResourceCondition struct {
+	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
 }
 
-type Request struct {
-	SentTimestamp             int64           `json:"sentTimestamp"`
-	ResourceID                string          `json:"resourceID"`
-	ObservedMaestroGeneration int64           `json:"observedMaestroGeneration"`
-	ObservedCreationTimestamp int64           `json:"observedCreationTimestamp"`
-	ReconcileStatus           ReconcileStatus `json:"reconcileStatus"`
+type ResourceStatus struct {
+	Values []workv1.FeedbackValue `json:"values"`
 }
 
 func NewSub() *cobra.Command {
@@ -84,12 +90,17 @@ func listener(ctx context.Context, broker, rTopic, username, password string) {
 			// fmt.Printf("Received message with response topic %s and correl id %s\n%s",
 			// 	m.Properties.ResponseTopic, string(m.Properties.CorrelationData))
 
-			var r Request
-			if err := json.NewDecoder(bytes.NewReader(m.Payload)).Decode(&r); err != nil {
+			var status ManifestStatus
+			if err := json.NewDecoder(bytes.NewReader(m.Payload)).Decode(&status); err != nil {
 				fmt.Printf("Failed to decode request %s, %v\n", string(m.Payload), err)
 			}
 
-			fmt.Printf("Received resouce status update %v\n", r)
+			fmt.Printf("Received resouce status update:\n")
+			fmt.Printf("\t ResourceID=%s, ResourceVersion=%d\n", status.ResourceID, status.ResourceVersion)
+			fmt.Printf("\t ResourceCondition: %v\n", status.ResourceCondition)
+			for _, val := range status.ResourceStatus.Values {
+				fmt.Printf("\t ResourceStatus: %s=%d\n", val.Name, *val.Value.Integer)
+			}
 
 			if _, err := c.Publish(context.Background(), &paho.Publish{
 				Properties: &paho.PublishProperties{

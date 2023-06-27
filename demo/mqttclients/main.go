@@ -3,9 +3,7 @@ package main
 import (
 	goflag "flag"
 	"fmt"
-	"math/rand"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -13,13 +11,11 @@ import (
 	utilflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
 
-	"open-cluster-management.io/work/demo/maestrosimulator/pub"
-	"open-cluster-management.io/work/demo/maestrosimulator/sub"
+	"open-cluster-management.io/work/demo/mqttclients/pub"
+	"open-cluster-management.io/work/demo/mqttclients/sub"
 )
 
 func main() {
-	rand.Seed(time.Now().UTC().UnixNano())
-
 	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 
@@ -36,8 +32,8 @@ func main() {
 
 func newWorkCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "simulator",
-		Short:   "Simulate the Maestro to pub/sub resource",
+		Use:     "mqttclient",
+		Short:   "Simulate pub/sub resource",
 		Version: "0.1.0",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()

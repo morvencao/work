@@ -25,7 +25,7 @@ spec:
           - "--spoke-cluster-name=cluster1"
           - "--mqtt-broker-host=mqttbroker:1883"
           - "--mqtt-incoming-topic=/v1/cluster1/+/content"
-          - "--mqtt-response-topic=/v1/shard1/cluster1/status"
+          - "--mqtt-response-topic=/v1/clusters/cluster1/status"
           - "--disable-leader-election"
         securityContext:
           allowPrivilegeEscalation: false

@@ -19,7 +19,8 @@ import (
 	"k8s.io/klog/v2"
 
 	workv1 "open-cluster-management.io/api/work/v1"
-	"open-cluster-management.io/work/pkg/clients/decoder"
+	"open-cluster-management.io/work/pkg/clients/mqclients/decoder"
+	"open-cluster-management.io/work/pkg/clients/mqclients/payload"
 	"open-cluster-management.io/work/pkg/clients/watcher"
 )
 
@@ -43,41 +44,30 @@ func (l *ErrorLogger) Printf(format string, v ...interface{}) {
 	klog.Errorf(format, v...)
 }
 
-type ReconcileStatus struct {
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-type Request struct {
-	SentTimestamp             int64           `json:"sentTimestamp"`
-	ResourceID                string          `json:"resourceID"`
-	ObservedMaestroGeneration int64           `json:"observedMaestroGeneration"`
-	ObservedCreationTimestamp int64           `json:"observedCreationTimestamp"`
-	ReconcileStatus           ReconcileStatus `json:"reconcileStatus"`
+type workMeta struct {
+	status            *payload.ManifestStatus
+	gen               int64
+	creationTimestamp metav1.Time
 }
 
 type MQTTClient struct {
 	sync.Mutex
-
-	options    *MQTTClientOptions
-	subClient  *paho.Client
-	pubHandler *rpc.Handler
-
+	options     *MQTTClientOptions
+	decoder     decoder.Decoder
+	subClient   *paho.Client
+	pubHandler  *rpc.Handler
+	msgChan     chan *paho.Publish
+	workMetas   map[types.UID]*workMeta
 	clusterName string
-
-	msgChan  chan *paho.Publish
-	gens     map[types.UID]int64
-	requests map[types.UID]*Request
 }
 
 func NewMQTTClient(options *MQTTClientOptions, clusterName string) *MQTTClient {
 	return &MQTTClient{
 		options:     options,
+		decoder:     &decoder.MQTTDecoder{ClusterName: clusterName},
 		msgChan:     make(chan *paho.Publish),
+		workMetas:   make(map[types.UID]*workMeta),
 		clusterName: clusterName,
-		gens:        make(map[types.UID]int64),
-		requests:    make(map[types.UID]*Request),
 	}
 }
 
@@ -105,21 +95,28 @@ func (c *MQTTClient) Connect(ctx context.Context) error {
 }
 
 func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) error {
-	request := toStatusRequest(c.clusterName, work)
-
-	lastRequest := c.requests[work.UID]
-	if lastRequest != nil &&
-		request.ObservedMaestroGeneration == lastRequest.ObservedMaestroGeneration &&
-		equality.Semantic.DeepEqual(request.ReconcileStatus, lastRequest.ReconcileStatus) {
+	workMeta, ok := c.workMetas[work.UID]
+	if !ok {
+		// this should be happened
 		return nil
 	}
 
-	c.requests[work.UID] = request
-	payload, _ := json.Marshal(request)
+	newStatus := toStatus(c.clusterName, work)
+	lastStatus := workMeta.status
+	if lastStatus != nil &&
+		newStatus.ResourceVersion == lastStatus.ResourceVersion &&
+		equality.Semantic.DeepEqual(newStatus.ResourceCondition, lastStatus.ResourceCondition) {
+		return nil
+	}
+
+	workMeta.status = newStatus
+	//c.workMetas[work.UID] = workMeta
+
+	jsonPayload, _ := json.Marshal(newStatus)
 
 	resp, err := c.pubHandler.Request(ctx, &paho.Publish{
 		Topic:   c.options.ResponseTopic,
-		Payload: payload,
+		Payload: jsonPayload,
 	})
 	if err != nil {
 		return err
@@ -128,14 +125,13 @@ func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) err
 	// TODO do more checks
 	klog.Infof("Received response: %s", string(resp.Payload))
 
-	if request.ReconcileStatus.Reason == "Deleted" {
-		delete(c.gens, work.UID)
-		delete(c.requests, work.UID)
+	if newStatus.ResourceCondition.Type == payload.ResourceConditionTypeDeleted {
+		delete(c.workMetas, work.UID)
 	}
 	return nil
 }
 
-func (c *MQTTClient) Subscribe(ctx context.Context, decoder decoder.Decoder, receiver watcher.Receiver) error {
+func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) error {
 	sa, err := c.subClient.Subscribe(ctx, &paho.Subscribe{
 		Subscriptions: map[string]paho.SubscribeOptions{
 			c.options.IncomingTopic: {QoS: byte(c.options.IncomingQoS)},
@@ -153,7 +149,7 @@ func (c *MQTTClient) Subscribe(ctx context.Context, decoder decoder.Decoder, rec
 
 	for m := range c.msgChan {
 		klog.Infof("payload from MQQT %s", string(m.Payload))
-		work, err := decoder.Decode(m.Payload)
+		work, err := c.decoder.Decode(m.Payload)
 		if err != nil {
 			klog.Errorf("failed to decode payload %s, %v", string(m.Payload), err)
 			continue
@@ -164,6 +160,7 @@ func (c *MQTTClient) Subscribe(ctx context.Context, decoder decoder.Decoder, rec
 			continue
 		}
 
+		klog.Infof("add event to informer %v", evt)
 		receiver.Receive(*evt)
 	}
 
@@ -175,23 +172,34 @@ func (c *MQTTClient) generateEvent(work *workv1.ManifestWork) *watch.Event {
 	defer c.Unlock()
 
 	currentGen := work.Generation
-	lastGen, ok := c.gens[work.UID]
+	lastWorkMeta, ok := c.workMetas[work.UID]
 	if !ok {
-		// add to current map
-		c.gens[work.UID] = currentGen
 		work.CreationTimestamp = metav1.Now()
+
+		// add to current map
+		lastWorkMeta := &workMeta{
+			gen:               currentGen,
+			creationTimestamp: work.CreationTimestamp,
+		}
+		c.workMetas[work.UID] = lastWorkMeta
 		return &watch.Event{
 			Type:   watch.Added,
 			Object: work,
 		}
 	}
 
-	if currentGen == lastGen {
+	// delete the workloads
+	if !work.DeletionTimestamp.IsZero() {
+		currentGen = currentGen + 1
+	}
+
+	if currentGen == lastWorkMeta.gen {
 		return nil
 	}
 
-	// update current map
-	c.gens[work.UID] = currentGen
+	// update current gen
+	lastWorkMeta.gen = currentGen
+	//c.gens[work.UID] = currentGen
 	return &watch.Event{
 		Type:   watch.Modified,
 		Object: work,
@@ -265,14 +273,13 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 }
 
 // TODO aggregate the work status for reconcile status and this should be a common function
-func toStatusRequest(clusterName string, work *workv1.ManifestWork) *Request {
+func toStatus(clusterName string, work *workv1.ManifestWork) *payload.ManifestStatus {
 	if !work.DeletionTimestamp.IsZero() && len(work.Finalizers) == 0 {
-		return &Request{
-			SentTimestamp:             time.Now().Unix(),
-			ResourceID:                string(work.UID),
-			ObservedMaestroGeneration: work.Generation,
-			ObservedCreationTimestamp: work.CreationTimestamp.Unix(),
-			ReconcileStatus: ReconcileStatus{
+		return &payload.ManifestStatus{
+			ResourceID:      string(work.UID),
+			ResourceVersion: work.Generation,
+			ResourceCondition: payload.ResourceCondition{
+				Type:    payload.ResourceConditionTypeDeleted,
 				Status:  "True",
 				Reason:  "Deleted",
 				Message: fmt.Sprintf("The resouce is deleted from the cluster %s", clusterName),
@@ -280,25 +287,41 @@ func toStatusRequest(clusterName string, work *workv1.ManifestWork) *Request {
 		}
 	}
 
-	reconcileStatus := ReconcileStatus{
+	status := &payload.ManifestStatus{
+		ResourceID:      string(work.UID),
+		ResourceVersion: work.Generation,
+	}
+
+	status.ResourceCondition = payload.ResourceCondition{
+		Type:    payload.ResourceConditionTypeApplied,
 		Status:  "False",
 		Reason:  "Progressing",
 		Message: fmt.Sprintf("The resouce is in the progress to be applied on the cluster %s", clusterName),
 	}
 
 	if meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkApplied) {
-		reconcileStatus = ReconcileStatus{
+		status.ResourceCondition = payload.ResourceCondition{
+			Type:    payload.ResourceConditionTypeApplied,
 			Status:  "True",
 			Reason:  "Applied",
 			Message: fmt.Sprintf("The resouce is applied on the cluster %s", clusterName),
 		}
 	}
 
-	return &Request{
-		SentTimestamp:             time.Now().Unix(),
-		ResourceID:                string(work.UID),
-		ObservedMaestroGeneration: work.Generation,
-		ObservedCreationTimestamp: work.CreationTimestamp.Unix(),
-		ReconcileStatus:           reconcileStatus,
+	if meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkAvailable) &&
+		len(work.Status.ResourceStatus.Manifests) != 0 &&
+		len(work.Status.ResourceStatus.Manifests[0].StatusFeedbacks.Values) != 0 {
+		status.ResourceCondition = payload.ResourceCondition{
+			Type:    payload.ResourceConditionTypeAvailable,
+			Status:  "True",
+			Reason:  "Available",
+			Message: fmt.Sprintf("The resouce is available on the cluster %s", clusterName),
+		}
+
+		status.ResourceStatus = payload.ResourceStatus{
+			Values: work.Status.ResourceStatus.Manifests[0].StatusFeedbacks.Values,
+		}
 	}
+
+	return status
 }

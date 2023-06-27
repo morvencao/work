@@ -22,7 +22,7 @@ func NewMQTTClientOptions() *MQTTClientOptions {
 		ConnEstablishingRetry: 10,
 		IncomingTopic:         "/v1/cluster1/+/content",
 		IncomingQoS:           0,
-		ResponseTopic:         "/v1/shard1/cluster1/status",
+		ResponseTopic:         "/v1/clusters/cluster1/status",
 		ResponseQoS:           0,
 	}
 }
