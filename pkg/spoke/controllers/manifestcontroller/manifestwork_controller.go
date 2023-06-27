@@ -310,8 +310,6 @@ func (m *ManifestWorkController) applyOneManifest(
 		return result
 	}
 
-	klog.Infof("----------> %v", required)
-
 	resMeta, gvr, err := helper.BuildResourceMeta(index, required, m.restMapper)
 	result.resourceMeta = resMeta
 	if err != nil {

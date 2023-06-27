@@ -1,4 +1,4 @@
-FROM golang:1.19 AS builder
+FROM golang:1.20 AS builder
 ARG OS=linux
 ARG ARCH=amd64
 WORKDIR /go/src/open-cluster-management.io/work
@@ -7,6 +7,7 @@ ENV GO_PACKAGE open-cluster-management.io/work
 
 RUN GOOS=${OS} \
     GOARCH=${ARCH} \
+    CGO_ENABLED=0 \
     make build --warn-undefined-variables
 
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
