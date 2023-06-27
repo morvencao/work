@@ -105,14 +105,21 @@ func (c *MQTTClient) Connect(ctx context.Context) error {
 }
 
 func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) error {
-	playload := c.toStatusRequest(work)
-	if playload == nil {
+	request := toStatusRequest(c.clusterName, work)
+
+	lastRequest := c.requests[work.UID]
+	if lastRequest != nil &&
+		request.ObservedMaestroGeneration == lastRequest.ObservedMaestroGeneration &&
+		equality.Semantic.DeepEqual(request.ReconcileStatus, lastRequest.ReconcileStatus) {
 		return nil
 	}
 
+	c.requests[work.UID] = request
+	payload, _ := json.Marshal(request)
+
 	resp, err := c.pubHandler.Request(ctx, &paho.Publish{
 		Topic:   c.options.ResponseTopic,
-		Payload: playload,
+		Payload: payload,
 	})
 	if err != nil {
 		return err
@@ -120,6 +127,11 @@ func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) err
 
 	// TODO do more checks
 	klog.Infof("Received response: %s", string(resp.Payload))
+
+	if request.ReconcileStatus.Reason == "Deleted" {
+		delete(c.gens, work.UID)
+		delete(c.requests, work.UID)
+	}
 	return nil
 }
 
@@ -252,43 +264,41 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 	return client, nil
 }
 
-// TODO aggregate the work status for reconcile status
-func (c *MQTTClient) toStatusRequest(work *workv1.ManifestWork) []byte {
+// TODO aggregate the work status for reconcile status and this should be a common function
+func toStatusRequest(clusterName string, work *workv1.ManifestWork) *Request {
+	if !work.DeletionTimestamp.IsZero() && len(work.Finalizers) == 0 {
+		return &Request{
+			SentTimestamp:             time.Now().Unix(),
+			ResourceID:                string(work.UID),
+			ObservedMaestroGeneration: work.Generation,
+			ObservedCreationTimestamp: work.CreationTimestamp.Unix(),
+			ReconcileStatus: ReconcileStatus{
+				Status:  "True",
+				Reason:  "Deleted",
+				Message: fmt.Sprintf("The resouce is deleted from the cluster %s", clusterName),
+			},
+		}
+	}
+
 	reconcileStatus := ReconcileStatus{
 		Status:  "False",
 		Reason:  "Progressing",
-		Message: fmt.Sprintf("The resouce is  in the progress to be applied on the cluster %s", c.clusterName),
+		Message: fmt.Sprintf("The resouce is in the progress to be applied on the cluster %s", clusterName),
 	}
 
 	if meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkApplied) {
 		reconcileStatus = ReconcileStatus{
 			Status:  "True",
-			Reason:  workv1.WorkApplied,
-			Message: fmt.Sprintf("The resouce is applied on the cluster %s", c.clusterName),
+			Reason:  "Applied",
+			Message: fmt.Sprintf("The resouce is applied on the cluster %s", clusterName),
 		}
 	}
 
-	request := &Request{
+	return &Request{
 		SentTimestamp:             time.Now().Unix(),
 		ResourceID:                string(work.UID),
 		ObservedMaestroGeneration: work.Generation,
 		ObservedCreationTimestamp: work.CreationTimestamp.Unix(),
 		ReconcileStatus:           reconcileStatus,
 	}
-
-	lastRequest, ok := c.requests[work.UID]
-	if !ok {
-		c.requests[work.UID] = request
-		jsonData, _ := json.Marshal(request)
-		return jsonData
-	}
-
-	if request.ObservedMaestroGeneration == lastRequest.ObservedMaestroGeneration &&
-		equality.Semantic.DeepEqual(request.ReconcileStatus, lastRequest.ReconcileStatus) {
-		return nil
-	}
-
-	c.requests[work.UID] = request
-	jsonData, _ := json.Marshal(request)
-	return jsonData
 }

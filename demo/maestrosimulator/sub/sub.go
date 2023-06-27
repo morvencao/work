@@ -81,7 +81,7 @@ func listener(ctx context.Context, broker, rTopic, username, password string) {
 
 	c.Router = paho.NewSingleHandlerRouter(func(m *paho.Publish) {
 		if m.Properties != nil && m.Properties.CorrelationData != nil && m.Properties.ResponseTopic != "" {
-			// klog.V(4).Infof("Received message with response topic %s and correl id %s\n%s",
+			// fmt.Printf("Received message with response topic %s and correl id %s\n%s",
 			// 	m.Properties.ResponseTopic, string(m.Properties.CorrelationData))
 
 			var r Request
