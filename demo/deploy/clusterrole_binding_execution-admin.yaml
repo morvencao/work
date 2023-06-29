@@ -9,7 +9,7 @@ roleRef:
   kind: ClusterRole
   # We deploy a controller that could work with permission lower than cluster-admin, the tradeoff is
   # responsivity because list/watch cannot be maintained over too many namespaces.
-  name: admin
+  name: cluster-admin
 subjects:
   - kind: ServiceAccount
     name: work-agent-sa

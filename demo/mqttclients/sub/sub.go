@@ -98,9 +98,11 @@ func listener(ctx context.Context, broker, rTopic, username, password string) {
 			fmt.Printf("Received resouce status update:\n")
 			fmt.Printf("\t ResourceID=%s, ResourceVersion=%d\n", status.ResourceID, status.ResourceVersion)
 			fmt.Printf("\t ResourceCondition: %v\n", status.ResourceCondition)
-			for _, val := range status.ResourceStatus.Values {
-				fmt.Printf("\t ResourceStatus: %s=%d\n", val.Name, *val.Value.Integer)
-			}
+			// for _, val := range status.ResourceStatus.Values {
+			// 	if val.Value.Integer != nil {
+			// 		fmt.Printf("\t ResourceStatus: %s=%d\n", val.Name, *val.Value.Integer)
+			// 	}
+			// }
 
 			if _, err := c.Publish(context.Background(), &paho.Publish{
 				Properties: &paho.PublishProperties{

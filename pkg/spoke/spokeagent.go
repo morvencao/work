@@ -3,6 +3,9 @@ package spoke
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime"
+	"runtime/pprof"
 	"time"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
@@ -13,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
@@ -46,6 +50,7 @@ type WorkloadAgentOptions struct {
 	SpokeKubeconfigFile                    string
 	SpokeClusterName                       string
 	AgentID                                string
+	MemProfileFile                         string
 	Burst                                  int
 	StatusSyncInterval                     time.Duration
 	AppliedManifestWorkEvictionGracePeriod time.Duration
@@ -75,6 +80,7 @@ func (o *WorkloadAgentOptions) AddFlags(cmd *cobra.Command) {
 		"Location of kubeconfig file to connect to spoke cluster. If this is not set, will use '--kubeconfig' to build client to connect to the managed cluster.")
 	flags.StringVar(&o.SpokeClusterName, "spoke-cluster-name", o.SpokeClusterName, "Name of spoke cluster.")
 	flags.StringVar(&o.AgentID, "agent-id", o.AgentID, "ID of the work agent to identify the work this agent should handle after restart/recovery.")
+	flags.StringVar(&o.MemProfileFile, "memprofile-file", o.MemProfileFile, "Location of memory profile file.")
 	flags.Float32Var(&o.QPS, "spoke-kube-api-qps", o.QPS, "QPS to use while talking with apiserver on spoke cluster.")
 	flags.IntVar(&o.Burst, "spoke-kube-api-burst", o.Burst, "Burst to use while talking with apiserver on spoke cluster.")
 	flags.DurationVar(&o.StatusSyncInterval, "status-sync-interval", o.StatusSyncInterval, "Interval to sync resource status to hub.")
@@ -228,6 +234,23 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	go appliedManifestWorkController.Run(ctx, 1)
 	go manifestWorkFinalizeController.Run(ctx, manifestWorkFinalizeControllerWorkers)
 	go availableStatusController.Run(ctx, availableStatusControllerWorkers)
+
+	if len(o.MemProfileFile) != 0 {
+		// wait all controllers are started
+		time.Sleep(30 * time.Second)
+
+		f, err := os.Create(o.MemProfileFile)
+		if err != nil {
+			klog.Fatal("could not create memory profile: ", err)
+		}
+		defer f.Close()
+
+		runtime.GC() // get up-to-date statistics
+
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			klog.Fatalf("could not write memory profile: ", err)
+		}
+	}
 
 	<-ctx.Done()
 

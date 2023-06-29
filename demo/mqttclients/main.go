@@ -11,6 +11,7 @@ import (
 	utilflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
 
+	"open-cluster-management.io/work/demo/mqttclients/batchpub"
 	"open-cluster-management.io/work/demo/mqttclients/pub"
 	"open-cluster-management.io/work/demo/mqttclients/sub"
 )
@@ -43,5 +44,6 @@ func newWorkCommand() *cobra.Command {
 
 	cmd.AddCommand(sub.NewSub())
 	cmd.AddCommand(pub.NewPub())
+	cmd.AddCommand(batchpub.NewBPub())
 	return cmd
 }
