@@ -45,8 +45,7 @@ func (c *MQWorkClient) Update(ctx context.Context, manifestWork *workv1.Manifest
 	updatedObj := manifestWork.DeepCopy()
 	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
 
-	// TODO confirm if the manifest work is deleting and its finalizers are removed, can we remove the manifest work
-	// safely?
+	// the manifest work is deleting and its finalizers are removed, delete it safely
 	if !updatedObj.DeletionTimestamp.IsZero() && len(updatedObj.Finalizers) == 0 {
 		if err := c.mqClient.Publish(ctx, updatedObj); err != nil {
 			// TODO think about how to handle this error
@@ -54,7 +53,6 @@ func (c *MQWorkClient) Update(ctx context.Context, manifestWork *workv1.Manifest
 			return manifestWork, nil
 		}
 
-		klog.Infof("delete manifest work")
 		c.watcher.Receive(watch.Event{
 			Type:   watch.Deleted,
 			Object: updatedObj,
@@ -63,7 +61,6 @@ func (c *MQWorkClient) Update(ctx context.Context, manifestWork *workv1.Manifest
 		return updatedObj, nil
 	}
 
-	klog.Infof("update manifest work")
 	c.watcher.Receive(watch.Event{
 		Type:   watch.Modified,
 		Object: updatedObj,
@@ -77,6 +74,7 @@ func (c *MQWorkClient) UpdateStatus(ctx context.Context, manifestWork *workv1.Ma
 	defer c.Unlock()
 
 	updatedObj := manifestWork.DeepCopy()
+	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
 
 	klog.Infof("update manifest work status")
 	if err := c.mqClient.Publish(ctx, updatedObj); err != nil {
@@ -85,7 +83,6 @@ func (c *MQWorkClient) UpdateStatus(ctx context.Context, manifestWork *workv1.Ma
 		return manifestWork, nil
 	}
 
-	updatedObj.ResourceVersion = c.addResourceVersion(updatedObj.ResourceVersion)
 	c.watcher.Receive(watch.Event{
 		Type:   watch.Modified,
 		Object: updatedObj,

@@ -91,8 +91,45 @@ func (o *WorkloadAgentOptions) AddFlags(cmd *cobra.Command) {
 
 // RunWorkloadAgent starts the controllers on agent to process work from hub.
 func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
+	// load spoke client config and create spoke clients,
+	// the work agent may not running in the spoke/managed cluster.
+	spokeRestConfig, err := o.spokeKubeConfig(controllerContext)
+	if err != nil {
+		return err
+	}
+
+	spokeRestConfig.QPS = o.QPS
+	spokeRestConfig.Burst = o.Burst
+
+	spokeDynamicClient, err := dynamic.NewForConfig(spokeRestConfig)
+	if err != nil {
+		return err
+	}
+
+	spokeKubeClient, err := kubernetes.NewForConfig(spokeRestConfig)
+	if err != nil {
+		return err
+	}
+
+	spokeAPIExtensionClient, err := apiextensionsclient.NewForConfig(spokeRestConfig)
+	if err != nil {
+		return err
+	}
+
+	spokeWorkClient, err := workclientset.NewForConfig(spokeRestConfig)
+	if err != nil {
+		return err
+	}
+
+	restMapper, err := apiutil.NewDynamicRESTMapper(spokeRestConfig, apiutil.WithLazyDiscovery)
+	if err != nil {
+		return err
+	}
+
+	spokeWorkInformerFactory := workinformers.NewSharedInformerFactory(spokeWorkClient, 5*time.Minute)
+
 	// build hub client and informer
-	hubWorkClientBuilder := clients.NewHubWorkClientBuilder(o.SpokeClusterName).
+	hubWorkClientBuilder := clients.NewHubWorkClientBuilder(o.SpokeClusterName, restMapper).
 		WithHubKubeconfigFile(o.HubKubeconfigFile).
 		WithMQTTOptions(o.mqttOptions)
 	hubWorkClientHolder, err := hubWorkClientBuilder.NewHubWorkClient(ctx)
@@ -108,37 +145,6 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	agentID := o.AgentID
 	if len(agentID) == 0 {
 		agentID = hubhash
-	}
-
-	// load spoke client config and create spoke clients,
-	// the work agent may not running in the spoke/managed cluster.
-	spokeRestConfig, err := o.spokeKubeConfig(controllerContext)
-	if err != nil {
-		return err
-	}
-
-	spokeRestConfig.QPS = o.QPS
-	spokeRestConfig.Burst = o.Burst
-	spokeDynamicClient, err := dynamic.NewForConfig(spokeRestConfig)
-	if err != nil {
-		return err
-	}
-	spokeKubeClient, err := kubernetes.NewForConfig(spokeRestConfig)
-	if err != nil {
-		return err
-	}
-	spokeAPIExtensionClient, err := apiextensionsclient.NewForConfig(spokeRestConfig)
-	if err != nil {
-		return err
-	}
-	spokeWorkClient, err := workclientset.NewForConfig(spokeRestConfig)
-	if err != nil {
-		return err
-	}
-	spokeWorkInformerFactory := workinformers.NewSharedInformerFactory(spokeWorkClient, 5*time.Minute)
-	restMapper, err := apiutil.NewDynamicRESTMapper(spokeRestConfig, apiutil.WithLazyDiscovery)
-	if err != nil {
-		return err
 	}
 
 	validator := auth.NewFactory(

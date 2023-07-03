@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/eclipse/paho.golang/paho"
@@ -14,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	workv1 "open-cluster-management.io/api/work/v1"
@@ -44,31 +43,27 @@ func (l *ErrorLogger) Printf(format string, v ...interface{}) {
 	klog.Errorf(format, v...)
 }
 
-type workMeta struct {
-	status            *payload.ManifestStatus
-	gen               int64
-	creationTimestamp metav1.Time
-}
-
 type MQTTClient struct {
-	sync.Mutex
 	options     *MQTTClientOptions
-	decoder     decoder.Decoder
+	decoder     decoder.Decorder
 	subClient   *paho.Client
 	pubHandler  *rpc.Handler
 	msgChan     chan *paho.Publish
-	workMetas   map[types.UID]*workMeta
+	store       cache.Store
 	clusterName string
 }
 
-func NewMQTTClient(options *MQTTClientOptions, clusterName string) *MQTTClient {
+func NewMQTTClient(options *MQTTClientOptions, clusterName string, restMapper meta.RESTMapper) *MQTTClient {
 	return &MQTTClient{
 		options:     options,
-		decoder:     &decoder.MQTTDecoder{ClusterName: clusterName},
+		decoder:     decoder.NewMQTTDecoder(clusterName, restMapper),
 		msgChan:     make(chan *paho.Publish),
-		workMetas:   make(map[types.UID]*workMeta),
 		clusterName: clusterName,
 	}
+}
+
+func (c *MQTTClient) SetStore(store cache.Store) {
+	c.store = store
 }
 
 func (c *MQTTClient) Connect(ctx context.Context) error {
@@ -95,25 +90,31 @@ func (c *MQTTClient) Connect(ctx context.Context) error {
 }
 
 func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) error {
-	workMeta, ok := c.workMetas[work.UID]
-	if !ok {
-		// this should be happened
+	lastObj, exists, err := c.store.Get(work)
+	if err != nil {
+		klog.Errorf("failed to get the work from store %v", err)
 		return nil
 	}
 
+	if !exists {
+		// do nothing
+		return nil
+	}
+
+	lastWork, ok := lastObj.(*workv1.ManifestWork)
+	if !ok {
+		klog.Errorf("failed to convert store object, %v", lastObj)
+		return nil
+	}
+
+	lastStatus := toStatus(c.clusterName, lastWork)
 	newStatus := toStatus(c.clusterName, work)
-	lastStatus := workMeta.status
-	if lastStatus != nil &&
-		newStatus.ResourceVersion == lastStatus.ResourceVersion &&
+	if lastWork.ResourceVersion == work.ResourceVersion &&
 		equality.Semantic.DeepEqual(newStatus.ResourceCondition, lastStatus.ResourceCondition) {
 		return nil
 	}
 
-	workMeta.status = newStatus
-	//c.workMetas[work.UID] = workMeta
-
 	jsonPayload, _ := json.Marshal(newStatus)
-
 	resp, err := c.pubHandler.Request(ctx, &paho.Publish{
 		Topic:   c.options.ResponseTopic,
 		Payload: jsonPayload,
@@ -124,10 +125,6 @@ func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) err
 
 	// TODO do more checks
 	klog.Infof("Received response: %s", string(resp.Payload))
-
-	if newStatus.ResourceCondition.Type == payload.ResourceConditionTypeDeleted {
-		delete(c.workMetas, work.UID)
-	}
 	return nil
 }
 
@@ -160,7 +157,6 @@ func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) e
 			continue
 		}
 
-		klog.Infof("add event to informer %v", evt)
 		receiver.Receive(*evt)
 	}
 
@@ -168,38 +164,41 @@ func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) e
 }
 
 func (c *MQTTClient) generateEvent(work *workv1.ManifestWork) *watch.Event {
-	c.Lock()
-	defer c.Unlock()
+	lastObj, exists, err := c.store.Get(work)
+	if err != nil {
+		klog.Errorf("failed to get the work from store %v", err)
+		return nil
+	}
 
-	currentGen := work.Generation
-	lastWorkMeta, ok := c.workMetas[work.UID]
-	if !ok {
+	if !exists {
 		work.CreationTimestamp = metav1.Now()
-
-		// add to current map
-		lastWorkMeta := &workMeta{
-			gen:               currentGen,
-			creationTimestamp: work.CreationTimestamp,
-		}
-		c.workMetas[work.UID] = lastWorkMeta
 		return &watch.Event{
 			Type:   watch.Added,
 			Object: work,
 		}
 	}
 
-	// delete the workloads
-	if !work.DeletionTimestamp.IsZero() {
-		currentGen = currentGen + 1
-	}
-
-	if currentGen == lastWorkMeta.gen {
+	lastWork, ok := lastObj.(*workv1.ManifestWork)
+	if !ok {
+		klog.Errorf("failed to convert store object, %v", lastObj)
 		return nil
 	}
 
-	// update current gen
-	lastWorkMeta.gen = currentGen
-	//c.gens[work.UID] = currentGen
+	if !work.DeletionTimestamp.IsZero() {
+		work.Generation = lastWork.Generation + 1
+		work.Spec = lastWork.Spec
+	}
+
+	if work.Generation == lastWork.Generation {
+		return nil
+	}
+
+	// set required fields back
+	work.Finalizers = lastWork.Finalizers
+	work.CreationTimestamp = lastWork.CreationTimestamp
+	work.ResourceVersion = lastWork.ResourceVersion
+	work.Status = lastWork.Status
+
 	return &watch.Event{
 		Type:   watch.Modified,
 		Object: work,

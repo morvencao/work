@@ -3,7 +3,9 @@ package watcher
 import (
 	"sync"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/klog/v2"
 )
 
 type Receiver interface {
@@ -59,5 +61,8 @@ func (mw *MessageQueueWatcher) Stop() {
 
 // receive reads result from the decoder in a loop and sends down the result channel.
 func (mw *MessageQueueWatcher) Receive(evt watch.Event) {
+	obj, _ := meta.Accessor(evt.Object)
+	klog.Infof("receive the event %v for %v", evt.Type, obj.GetName())
+
 	mw.result <- evt
 }

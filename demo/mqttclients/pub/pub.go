@@ -34,8 +34,8 @@ func NewPub() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 
 			Run(
-				clusterName,
 				broker, username, password,
+				clusterName,
 				resourceID,
 				toMsg(resourceID, resouceFilePath, updateStrategy, deletePolicy, generation, delete),
 			)
@@ -112,7 +112,7 @@ func Run(broker, username, password string, clusterName, resourceID string, mess
 func toMsg(resourceID, resouceFilePath string, updateStrategy, deletePolicy string, generation int64, delete bool) string {
 	msgs := []string{fmt.Sprintf("\"resourceID\":\"%s\"", resourceID)}
 
-	msgs = append(msgs, fmt.Sprintf("\"resourceVersion\":\"%d\"", generation))
+	msgs = append(msgs, fmt.Sprintf("\"resourceVersion\":%d", generation))
 
 	if delete {
 		now := metav1.Now()
@@ -132,10 +132,10 @@ func toMsg(resourceID, resouceFilePath string, updateStrategy, deletePolicy stri
 
 	msgs = append(msgs, fmt.Sprintf("\"manifest\":%s", manifest))
 
-	msgs = append(msgs, "\"statusFeedbackRules\":{\"type\":\"WellKnownStatus\"}")
+	msgs = append(msgs, "\"statusFeedbackRule\":{\"type\":\"WellKnownStatus\"}")
 
 	if len(updateStrategy) != 0 {
-		msgs = append(msgs, fmt.Sprintf("\"updateStrategy\":\"%s\"", updateStrategy))
+		msgs = append(msgs, fmt.Sprintf("\"updateStrategy\":{\"type\":\"%s\"}", updateStrategy))
 	}
 
 	if len(deletePolicy) != 0 {

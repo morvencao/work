@@ -16,10 +16,10 @@ const (
 type ManifestPayload struct {
 	ResourceID          string                             `json:"resourceID"`
 	ResourceVersion     int64                              `json:"resourceVersion"`
-	Manifest            []byte                             `json:"manifest"`
+	DeletionTimestamp   *metav1.Time                       `json:"deletionTimestamp"`
+	Manifest            map[string]any                     `json:"manifest"`
 	StatusFeedbackRules workv1.FeedbackRule                `json:"statusFeedbackRule"`
-	UpdateStrategy      workv1.UpdateStrategyType          `json:"updateStrategy"`
-	DeletionTimestamp   metav1.Time                        `json:"deletionTimestamp"`
+	UpdateStrategy      *workv1.UpdateStrategy             `json:"updateStrategy"`
 	DeletePolicy        workv1.DeletePropagationPolicyType `json:"deletePolicy"`
 }
 

@@ -3,150 +3,100 @@ package decoder
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	workv1 "open-cluster-management.io/api/work/v1"
+	"open-cluster-management.io/work/pkg/clients/mqclients/payload"
+	"open-cluster-management.io/work/pkg/helper"
 )
 
-type Decoder interface {
+type Decorder interface {
 	Decode(data []byte) (*workv1.ManifestWork, error)
 }
 
 type MQTTDecoder struct {
-	ClusterName string
+	clusterName string
+	restMapper  meta.RESTMapper
+}
+
+func NewMQTTDecoder(clusterName string, restMapper meta.RESTMapper) *MQTTDecoder {
+	return &MQTTDecoder{
+		clusterName: clusterName,
+		restMapper:  restMapper,
+	}
 }
 
 func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
-	payload := map[string]any{}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal payload, %v", err)
-	}
-
-	resourceID, ok := payload["resourceID"]
-	if !ok {
-		return nil, fmt.Errorf("failed to find resourceID from payload")
-	}
-
-	resourceVersion, ok := payload["resourceVersion"]
-	if !ok {
-		return nil, fmt.Errorf("failed to find resourceVersion from payload")
-	}
-
-	generation, err := strconv.ParseInt(fmt.Sprintf("%v", resourceVersion), 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("faild to parse resourceVersion from payload, %v", err)
+	payloadObj := payload.ManifestPayload{}
+	if err := json.Unmarshal(data, &payloadObj); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal payload %s, %v", string(data), err)
 	}
 
 	work := &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       fmt.Sprintf("%s", resourceID),
-			Namespace:  d.ClusterName,
-			UID:        types.UID(fmt.Sprintf("%s", resourceID)),
-			Generation: generation,
+			Name:       payloadObj.ResourceID,
+			Namespace:  d.clusterName,
+			UID:        types.UID(payloadObj.ResourceID),
+			Generation: payloadObj.ResourceVersion,
 		},
 	}
 
-	deletionTimestamp, ok := payload["deletionTimestamp"]
-	if ok {
-		var timestamp metav1.Time
-		timestamp.UnmarshalQueryParameter(fmt.Sprintf("%s", deletionTimestamp))
-		work.DeletionTimestamp = &timestamp
-
-		// TODO
-		// deletePolicy, ok := payload["deletePolicy"]
-		// if ok {
-		// 	policy, ok := deletePolicy.(workv1.DeletePropagationPolicyType)
-		// 	if ok {
-		// 		work.Spec.DeleteOption = &workv1.DeleteOption{
-		// 			PropagationPolicy: policy,
-		// 		}
-		// 	}
-		// }
-
+	if payloadObj.DeletionTimestamp != nil {
+		work.DeletionTimestamp = payloadObj.DeletionTimestamp
 		return work, nil
 	}
 
-	manifest, ok := payload["manifest"]
-	if !ok {
-		return nil, fmt.Errorf("failed to find manifest from payload")
-	}
-
-	unstructuredMap, ok := manifest.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("faild to convert manifest to unstructured map")
-	}
-	unstructuredObj := unstructured.Unstructured{Object: unstructuredMap}
-
-	jsonData, err := json.Marshal(unstructuredObj.Object)
+	unstructuredObj := &unstructured.Unstructured{Object: payloadObj.Manifest}
+	manifestData, err := json.Marshal(unstructuredObj.Object)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal content, %v", err)
+		return nil, fmt.Errorf("failed to marshal content from payload %s, %v", string(data), err)
 	}
 
-	manifests := []workv1.Manifest{}
-	manifests = append(manifests, workv1.Manifest{
-		RawExtension: runtime.RawExtension{Raw: jsonData},
-	})
+	_, gvr, err := helper.BuildResourceMeta(0, unstructuredObj, d.restMapper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get manifest GVR from payload %s, %v", string(data), err)
+	}
+
+	resourceIdentifier := workv1.ResourceIdentifier{
+		Group:     gvr.Group,
+		Resource:  gvr.Resource,
+		Name:      unstructuredObj.GetName(),
+		Namespace: unstructuredObj.GetNamespace(),
+	}
 
 	work.Spec = workv1.ManifestWorkSpec{
 		Workload: workv1.ManifestsTemplate{
-			Manifests: manifests,
-		},
-		ManifestConfigs: []workv1.ManifestConfigOption{
-			{
-				ResourceIdentifier: workv1.ResourceIdentifier{
-					Group:     toGroup(unstructuredObj.GetAPIVersion()),
-					Resource:  toResouce(unstructuredObj.GetKind()),
-					Name:      unstructuredObj.GetName(),
-					Namespace: unstructuredObj.GetNamespace(),
-				},
-				FeedbackRules: []workv1.FeedbackRule{
-					{
-						Type: workv1.WellKnownStatusType,
-					},
-				},
+			Manifests: []workv1.Manifest{
+				{RawExtension: runtime.RawExtension{Raw: manifestData}},
 			},
 		},
 	}
 
-	// TODO
-	// updateStrategy, ok := payload["updateStrategy"]
-	// if ok {
-	// 	work.Spec.ManifestConfigs = []workv1.ManifestConfigOption{
-	// 		{
-	// 			ResourceIdentifier: workv1.ResourceIdentifier{
-	// 				Group:     toGroup(unstructuredObj.GetAPIVersion()),
-	// 				Resource:  toResouce(unstructuredObj.GetKind()),
-	// 				Name:      unstructuredObj.GetName(),
-	// 				Namespace: unstructuredObj.GetNamespace(),
-	// 			},
-	// 			UpdateStrategy: &workv1.UpdateStrategy{
-	// 				Type: workv1.UpdateStrategyType(fmt.Sprintf("%s", updateStrategy)),
-	// 			},
-	// 		},
-	// 	}
-	// }
-
-	return work, nil
-}
-
-// TODO need a way to refactor this
-func toGroup(apiVersion string) string {
-	gv := strings.Split(apiVersion, "/")
-	if len(gv) == 1 {
-		return ""
+	if len(payloadObj.DeletePolicy) != 0 {
+		work.Spec.DeleteOption = &workv1.DeleteOption{PropagationPolicy: payloadObj.DeletePolicy}
 	}
 
-	return gv[0]
-}
+	manifestConfigOption := workv1.ManifestConfigOption{
+		ResourceIdentifier: resourceIdentifier,
+	}
 
-// TODO need a way to refactor this
-func toResouce(kind string) string {
-	return strings.ToLower(kind) + "s"
+	manifestConfigOption.FeedbackRules = []workv1.FeedbackRule{
+		{
+			Type:      payloadObj.StatusFeedbackRules.Type,
+			JsonPaths: payloadObj.StatusFeedbackRules.JsonPaths,
+		},
+	}
+
+	if payloadObj.UpdateStrategy != nil {
+		manifestConfigOption.UpdateStrategy = payloadObj.UpdateStrategy
+	}
+
+	work.Spec.ManifestConfigs = []workv1.ManifestConfigOption{manifestConfigOption}
+	return work, nil
 }

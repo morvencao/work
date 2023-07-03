@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,16 +47,16 @@ func (c *HubWorkClient) GetHubHash() string {
 }
 
 type HubWorkClientBuilder struct {
-	clusterName string
-
+	restMapper        meta.RESTMapper
+	mqttOptions       *mqtt.MQTTClientOptions
+	clusterName       string
 	hubKubeconfigFile string
-
-	mqttOptions *mqtt.MQTTClientOptions
 }
 
-func NewHubWorkClientBuilder(clusterName string) *HubWorkClientBuilder {
+func NewHubWorkClientBuilder(clusterName string, restMapper meta.RESTMapper) *HubWorkClientBuilder {
 	return &HubWorkClientBuilder{
 		clusterName: clusterName,
+		restMapper:  restMapper,
 	}
 }
 
@@ -121,7 +122,7 @@ func (b *HubWorkClientBuilder) newKubeClient(ctx context.Context) (*HubWorkClien
 
 func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClient, error) {
 	watcher := watcher.NewMessageQueueWatcher()
-	mqttClient := mqtt.NewMQTTClient(b.mqttOptions, b.clusterName)
+	mqttClient := mqtt.NewMQTTClient(b.mqttOptions, b.clusterName, b.restMapper)
 
 	if err := mqttClient.Connect(ctx); err != nil {
 		return nil, err
@@ -148,6 +149,8 @@ func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClien
 		5*time.Minute,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
+
+	mqttClient.SetStore(manifestWorkInformer.GetStore())
 
 	return &HubWorkClient{
 		workClinet:   workClient,
