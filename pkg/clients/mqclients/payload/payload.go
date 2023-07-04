@@ -14,29 +14,32 @@ const (
 )
 
 type ManifestPayload struct {
-	ResourceID          string                             `json:"resourceID"`
-	ResourceVersion     int64                              `json:"resourceVersion"`
-	DeletionTimestamp   *metav1.Time                       `json:"deletionTimestamp"`
-	Manifest            map[string]any                     `json:"manifest"`
-	StatusFeedbackRules []workv1.FeedbackRule              `json:"statusFeedbackRules"`
-	UpdateStrategy      *workv1.UpdateStrategy             `json:"updateStrategy"`
-	DeletePolicy        workv1.DeletePropagationPolicyType `json:"deletePolicy"`
+	ResourceName        string                             `json:"resourceName,omitempty"`
+	ResourceID          string                             `json:"resourceID,omitempty"`
+	ResourceVersion     int64                              `json:"resourceVersion,omitempty"`
+	DeletionTimestamp   *metav1.Time                       `json:"deletionTimestamp,omitempty"`
+	Manifest            map[string]any                     `json:"manifest,omitempty"`
+	StatusFeedbackRules []workv1.FeedbackRule              `json:"statusFeedbackRule,omitempty"`
+	UpdateStrategy      *workv1.UpdateStrategy             `json:"updateStrategy,omitempty"`
+	DeletePolicy        workv1.DeletePropagationPolicyType `json:"deletePolicy,omitempty"`
 }
 
 type ManifestStatus struct {
-	ResourceID        string            `json:"resourceID"`
-	ResourceVersion   int64             `json:"resourceVersion"`
-	ResourceCondition ResourceCondition `json:"resourceCondition"`
-	ResourceStatus    ResourceStatus    `json:"resourceStatus"`
+	ClusterName       string            `json:"clusterName,omitempty"`
+	ResourceName      string            `json:"resourceName,omitempty"`
+	ResourceID        string            `json:"resourceID,omitempty"`
+	ResourceVersion   int64             `json:"resourceVersion,omitempty"`
+	ResourceCondition ResourceCondition `json:"resourceCondition,omitempty"`
+	ResourceStatus    ResourceStatus    `json:"resourceStatus,omitempty"`
 }
 
 type ResourceCondition struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type ResourceStatus struct {
-	Values []workv1.FeedbackValue `json:"values"`
+	Values []workv1.FeedbackValue `json:"values,omitempty"`
 }

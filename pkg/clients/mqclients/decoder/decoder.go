@@ -15,7 +15,7 @@ import (
 	"open-cluster-management.io/work/pkg/helper"
 )
 
-type Decorder interface {
+type Decoder interface {
 	Decode(data []byte) (*workv1.ManifestWork, error)
 }
 
@@ -40,7 +40,7 @@ func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
 	work := &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       payloadObj.ResourceID,
+			Name:       payloadObj.ResourceName,
 			Namespace:  d.clusterName,
 			UID:        types.UID(payloadObj.ResourceID),
 			Generation: payloadObj.ResourceVersion,

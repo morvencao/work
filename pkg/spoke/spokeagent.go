@@ -12,16 +12,23 @@ import (
 	"github.com/spf13/cobra"
 
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	kuberuntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
+	workv1lister "open-cluster-management.io/api/client/work/listers/work/v1"
 	ocmfeature "open-cluster-management.io/api/feature"
+	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/work/pkg/clients"
 	"open-cluster-management.io/work/pkg/clients/mqclients/mqtt"
 	"open-cluster-management.io/work/pkg/features"
@@ -129,18 +136,36 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	spokeWorkInformerFactory := workinformers.NewSharedInformerFactory(spokeWorkClient, 5*time.Minute)
 
 	// build hub client and informer
-	hubWorkClientBuilder := clients.NewHubWorkClientBuilder(o.SpokeClusterName, restMapper).
+	hubWorkClientBuilder := clients.NewHubWorkClientBuilder().
 		WithHubKubeconfigFile(o.HubKubeconfigFile).
-		WithMQTTOptions(o.mqttOptions)
+		WithMQTTOptions(o.mqttOptions).
+		WithClusterName(o.SpokeClusterName).
+		WithRestMapper(restMapper)
 	hubWorkClientHolder, err := hubWorkClientBuilder.NewHubWorkClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	hubWorkClient := hubWorkClientHolder.GetClinet()
-	hubWorkInformer := hubWorkClientHolder.GetInformer()
-	hubWorkLister := hubWorkClientHolder.GetLister()
+	hubWorkClientSet := hubWorkClientHolder.GetClientSet()
+	hubWorkClient := hubWorkClientSet.WorkV1().ManifestWorks(o.SpokeClusterName)
+	hubWorkInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (kuberuntime.Object, error) {
+				options.FieldSelector = fields.OneTermEqualSelector("metadata.namespace", o.SpokeClusterName).String()
+				return hubWorkClient.List(ctx, options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				options.FieldSelector = fields.OneTermEqualSelector("metadata.namespace", o.SpokeClusterName).String()
+				return hubWorkClient.Watch(ctx, options)
+			},
+		},
+		&workv1.ManifestWork{},
+		5*time.Minute,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	)
+	hubWorkLister := workv1lister.NewManifestWorkLister(hubWorkInformer.GetIndexer())
 	hubhash := hubWorkClientHolder.GetHubHash()
+	hubWorkClientHolder.SetStore(hubWorkInformer.GetStore())
 
 	agentID := o.AgentID
 	if len(agentID) == 0 {

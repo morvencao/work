@@ -156,11 +156,19 @@ func CreateManifestWork(mwrSet *workapiv1alpha1.ManifestWorkReplicaSet, clusterN
 		return nil, fmt.Errorf("Invalid cluster namespace")
 	}
 
-	return &workv1.ManifestWork{
+	work := &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      mwrSet.Name,
 			Namespace: clusterNS,
 			Labels:    map[string]string{ManifestWorkReplicaSetControllerNameLabelKey: manifestWorkReplicaSetKey(mwrSet)},
 		},
-		Spec: mwrSet.Spec.ManifestWorkTemplate}, nil
+		Spec: mwrSet.Spec.ManifestWorkTemplate,
+	}
+
+	resourceVersion, ok := mwrSet.GetAnnotations()[ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey]
+	if ok {
+		work.ResourceVersion = resourceVersion
+	}
+
+	return work, nil
 }
