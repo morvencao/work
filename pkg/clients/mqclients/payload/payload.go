@@ -18,7 +18,7 @@ type ManifestPayload struct {
 	ResourceVersion     int64                              `json:"resourceVersion"`
 	DeletionTimestamp   *metav1.Time                       `json:"deletionTimestamp"`
 	Manifest            map[string]any                     `json:"manifest"`
-	StatusFeedbackRules workv1.FeedbackRule                `json:"statusFeedbackRule"`
+	StatusFeedbackRules []workv1.FeedbackRule              `json:"statusFeedbackRules"`
 	UpdateStrategy      *workv1.UpdateStrategy             `json:"updateStrategy"`
 	DeletePolicy        workv1.DeletePropagationPolicyType `json:"deletePolicy"`
 }

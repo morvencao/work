@@ -93,14 +93,9 @@ func TestMQTTDecode(t *testing.T) {
 			name:    "payload with deletion option",
 			payload: toPayload("", "Orphan", false),
 			verify: func(t *testing.T, work *workv1.ManifestWork) {
-				//config := work.Spec.ManifestConfigs[0]
 				if work.Spec.DeleteOption.PropagationPolicy != workv1.DeletePropagationPolicyTypeOrphan {
 					t.Errorf("unexpected deleteOption, %v", work.Spec.DeleteOption)
 				}
-
-				// if config.UpdateStrategy.Type != workv1.UpdateStrategyTypeCreateOnly {
-				// 	t.Errorf("unexpected updateStrategy, %v", config)
-				// }
 			},
 		},
 		{
@@ -146,7 +141,7 @@ func toPayload(updateStrategy, deletePolicy string, delete bool) []byte {
 
 	msgs = append(msgs, fmt.Sprintf("\"manifest\":%s", manifest))
 
-	msgs = append(msgs, "\"statusFeedbackRule\":{\"type\":\"WellKnownStatus\"}")
+	msgs = append(msgs, "\"statusFeedbackRules\":[{\"type\":\"WellKnownStatus\"}]")
 
 	if len(updateStrategy) != 0 {
 		msgs = append(msgs, fmt.Sprintf("\"updateStrategy\":{\"type\":\"%s\"}", updateStrategy))

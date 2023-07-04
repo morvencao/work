@@ -86,12 +86,7 @@ func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
 		ResourceIdentifier: resourceIdentifier,
 	}
 
-	manifestConfigOption.FeedbackRules = []workv1.FeedbackRule{
-		{
-			Type:      payloadObj.StatusFeedbackRules.Type,
-			JsonPaths: payloadObj.StatusFeedbackRules.JsonPaths,
-		},
-	}
+	manifestConfigOption.FeedbackRules = payloadObj.StatusFeedbackRules
 
 	if payloadObj.UpdateStrategy != nil {
 		manifestConfigOption.UpdateStrategy = payloadObj.UpdateStrategy
