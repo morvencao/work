@@ -37,6 +37,13 @@ const (
 	// TODO move this to the api repo
 	ManifestWorkReplicaSetControllerNameLabelKey = "work.open-cluster-management.io/manifestworkreplicaset"
 
+	// ManifestWorkReplicaSetControllerTemplateHashAnnotationKey is the annotation on ManifestWorkReplicaSet to identify the
+	// manifest template hash
+	ManifestWorkReplicaSetControllerTemplateHashAnnotationKey = "work.open-cluster-management.io/manifestwork-template-hash-resourceversion"
+	// ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey is the annotation on ManifestWorkReplicaSet to identify the
+	// resource version of manifest template
+	ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey = "work.open-cluster-management.io/manifestwork-template-resourceversion"
+
 	// ManifestWorkReplicaSetFinalizer is the name of the finalizer added to ManifestWorkReplicaSet. It is used to ensure
 	// related manifestworks is deleted
 	ManifestWorkReplicaSetFinalizer = "work.open-cluster-management.io/manifest-work-cleanup"
@@ -44,6 +51,7 @@ const (
 
 type ManifestWorkReplicaSetController struct {
 	workClient                    workclientset.Interface
+	workReplicaSetClient          workclientset.Interface
 	manifestWorkReplicaSetLister  worklisterv1alpha1.ManifestWorkReplicaSetLister
 	manifestWorkReplicaSetIndexer cache.Indexer
 
@@ -66,6 +74,7 @@ const (
 func NewManifestWorkReplicaSetController(
 	recorder events.Recorder,
 	workClient workclientset.Interface,
+	workReplicaSetClient workclientset.Interface,
 	manifestWorkReplicaSetInformer workinformerv1alpha1.ManifestWorkReplicaSetInformer,
 	manifestWorkInformer workinformerv1.ManifestWorkInformer,
 	placementInformer clusterinformerv1beta1.PlacementInformer,
@@ -73,13 +82,15 @@ func NewManifestWorkReplicaSetController(
 
 	controller := &ManifestWorkReplicaSetController{
 		workClient:                    workClient,
+		workReplicaSetClient:          workReplicaSetClient,
 		manifestWorkReplicaSetLister:  manifestWorkReplicaSetInformer.Lister(),
 		manifestWorkReplicaSetIndexer: manifestWorkReplicaSetInformer.Informer().GetIndexer(),
 
 		reconcilers: []ManifestWorkReplicaSetReconcile{
 			&finalizeReconciler{workApplier: workapplier.NewWorkApplierWithTypedClient(workClient, manifestWorkInformer.Lister()),
-				workClient: workClient, manifestWorkLister: manifestWorkInformer.Lister()},
-			&addFinalizerReconciler{workClient: workClient},
+				workClient: workReplicaSetClient, manifestWorkLister: manifestWorkInformer.Lister()},
+			&addFinalizerReconciler{workClient: workReplicaSetClient},
+			&resourceVersionReconciler{workClient: workReplicaSetClient},
 			&deployReconciler{workApplier: workapplier.NewWorkApplierWithTypedClient(workClient, manifestWorkInformer.Lister()),
 				manifestWorkLister: manifestWorkInformer.Lister(), placementLister: placementInformer.Lister(), placeDecisionLister: placeDecisionInformer.Lister()},
 			&statusReconciler{manifestWorkLister: manifestWorkInformer.Lister()},
@@ -199,7 +210,7 @@ func (m *ManifestWorkReplicaSetController) patchPlaceManifestStatus(ctx context.
 		return fmt.Errorf("failed to create patch for work %s: %w", old.Name, err)
 	}
 
-	_, err = m.workClient.WorkV1alpha1().ManifestWorkReplicaSets(old.Namespace).Patch(ctx, old.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+	_, err = m.workReplicaSetClient.WorkV1alpha1().ManifestWorkReplicaSets(old.Namespace).Patch(ctx, old.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
 	return err
 }
 

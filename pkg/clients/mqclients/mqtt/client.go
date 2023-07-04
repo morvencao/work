@@ -13,12 +13,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/work/pkg/clients/mqclients/decoder"
+	"open-cluster-management.io/work/pkg/clients/mqclients/encoder"
 	"open-cluster-management.io/work/pkg/clients/mqclients/payload"
 	"open-cluster-management.io/work/pkg/clients/watcher"
 )
@@ -45,8 +47,10 @@ func (l *ErrorLogger) Printf(format string, v ...interface{}) {
 
 type MQTTClient struct {
 	options     *MQTTClientOptions
-	decoder     decoder.Decorder
+	encoder     encoder.Encoder
+	decoder     decoder.Decoder
 	subClient   *paho.Client
+	pubClient   *paho.Client
 	pubHandler  *rpc.Handler
 	msgChan     chan *paho.Publish
 	store       cache.Store
@@ -56,6 +60,7 @@ type MQTTClient struct {
 func NewMQTTClient(options *MQTTClientOptions, clusterName string, restMapper meta.RESTMapper) *MQTTClient {
 	return &MQTTClient{
 		options:     options,
+		encoder:     encoder.NewMQTTEncoder(),
 		decoder:     decoder.NewMQTTDecoder(clusterName, restMapper),
 		msgChan:     make(chan *paho.Publish),
 		clusterName: clusterName,
@@ -83,13 +88,56 @@ func (c *MQTTClient) Connect(ctx context.Context) error {
 	}
 
 	c.subClient = subClient
+	c.pubClient = pubClient
 	c.pubHandler = rpcHanlder
 
 	klog.Infof("Connected to %s\n", c.options.BrokerHost)
 	return nil
 }
 
-func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) error {
+func (c *MQTTClient) PublishSpec(ctx context.Context, work *workv1.ManifestWork) error {
+	lastObj, exists, err := c.store.Get(work)
+	if err != nil {
+		klog.Errorf("failed to get the work from store %v", err)
+		return nil
+	}
+
+	if exists {
+		lastWork, ok := lastObj.(*workv1.ManifestWork)
+		if !ok {
+			klog.Errorf("failed to convert store object, %v", lastObj)
+			return nil
+		}
+
+		if lastWork.ResourceVersion == work.ResourceVersion &&
+			equality.Semantic.DeepEqual(lastWork.Spec, work.Spec) {
+			return nil
+		}
+	}
+
+	clusterName := work.Namespace
+	payloadJSON, err := c.encoder.Encode(work)
+	if err != nil {
+		return err
+	}
+
+	// TODO: use MQTT 5 request-request pattern for spec publish
+	resp, err := c.pubClient.Publish(ctx, &paho.Publish{
+		Topic:   fmt.Sprintf("/v1/%s/%s/content", clusterName, work.UID),
+		Payload: payloadJSON,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	// TODO do more checks
+	klog.Infof("Received response: %v", resp)
+
+	return nil
+}
+
+func (c *MQTTClient) PublishStatus(ctx context.Context, work *workv1.ManifestWork) error {
 	lastObj, exists, err := c.store.Get(work)
 	if err != nil {
 		klog.Errorf("failed to get the work from store %v", err)
@@ -144,20 +192,41 @@ func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) e
 
 	klog.Infof("Subscribed to %s", c.options.IncomingTopic)
 
-	for m := range c.msgChan {
-		klog.Infof("payload from MQQT %s", string(m.Payload))
-		work, err := c.decoder.Decode(m.Payload)
-		if err != nil {
-			klog.Errorf("failed to decode payload %s, %v", string(m.Payload), err)
-			continue
-		}
+	if c.clusterName != "" {
+		for m := range c.msgChan {
+			klog.Infof("payload from MQTT %s", string(m.Payload))
+			work, err := c.decoder.Decode(m.Payload)
+			if err != nil {
+				klog.Errorf("failed to decode payload %s, %v", string(m.Payload), err)
+				continue
+			}
 
-		evt := c.generateEvent(work)
-		if evt == nil {
-			continue
-		}
+			evt := c.generateEvent(work)
+			if evt == nil {
+				continue
+			}
 
-		receiver.Receive(*evt)
+			klog.Infof("add event to informer %v", evt)
+			receiver.Receive(*evt)
+		}
+	} else {
+		for m := range c.msgChan {
+			klog.Infof("payload from MQTT %s", string(m.Payload))
+
+			statusPayload := &payload.ManifestStatus{}
+			if err := json.Unmarshal(m.Payload, statusPayload); err != nil {
+				return fmt.Errorf("failed to unmarshal payload, %v", err)
+			}
+			work := fromStatus(statusPayload)
+
+			evt := &watch.Event{
+				Type:   watch.Modified,
+				Object: work,
+			}
+
+			klog.Infof("add event to informer %v", evt)
+			receiver.Receive(*evt)
+		}
 	}
 
 	return nil
@@ -224,7 +293,10 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 		break
 	}
 
-	clientID := fmt.Sprintf("%s-pub", c.clusterName)
+	clientID := "hub-pub"
+	if c.clusterName != "" {
+		clientID = fmt.Sprintf("%s-pub", c.clusterName)
+	}
 
 	cc := paho.ClientConfig{
 		Conn:   conn,
@@ -232,7 +304,10 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 	}
 
 	if sub {
-		clientID = fmt.Sprintf("%s-sub", c.clusterName)
+		clientID = "hub-sub"
+		if c.clusterName != "" {
+			clientID = fmt.Sprintf("%s-sub", c.clusterName)
+		}
 
 		cc.Router = paho.NewSingleHandlerRouter(func(m *paho.Publish) {
 			c.msgChan <- m
@@ -275,6 +350,8 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 func toStatus(clusterName string, work *workv1.ManifestWork) *payload.ManifestStatus {
 	if !work.DeletionTimestamp.IsZero() && len(work.Finalizers) == 0 {
 		return &payload.ManifestStatus{
+			ClusterName:     clusterName,
+			ResourceName:    work.Name,
 			ResourceID:      string(work.UID),
 			ResourceVersion: work.Generation,
 			ResourceCondition: payload.ResourceCondition{
@@ -287,6 +364,8 @@ func toStatus(clusterName string, work *workv1.ManifestWork) *payload.ManifestSt
 	}
 
 	status := &payload.ManifestStatus{
+		ClusterName:     clusterName,
+		ResourceName:    work.Name,
 		ResourceID:      string(work.UID),
 		ResourceVersion: work.Generation,
 	}
@@ -323,4 +402,40 @@ func toStatus(clusterName string, work *workv1.ManifestWork) *payload.ManifestSt
 	}
 
 	return status
+}
+
+func fromStatus(status *payload.ManifestStatus) *workv1.ManifestWork {
+	work := &workv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            status.ResourceName,
+			Namespace:       status.ClusterName,
+			UID:             types.UID(status.ResourceID),
+			ResourceVersion: fmt.Sprintf("%d", status.ResourceVersion),
+			Labels: map[string]string{
+				"work.open-cluster-management.io/manifestworkreplicaset": "default.mwrset-cronjob",
+			},
+		},
+		Spec: workv1.ManifestWorkSpec{},
+		Status: workv1.ManifestWorkStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:    status.ResourceCondition.Type,
+					Status:  metav1.ConditionStatus(status.ResourceCondition.Status),
+					Reason:  status.ResourceCondition.Reason,
+					Message: status.ResourceCondition.Message,
+				},
+			},
+			ResourceStatus: workv1.ManifestResourceStatus{
+				Manifests: []workv1.ManifestCondition{
+					{
+						StatusFeedbacks: workv1.StatusFeedbackResult{
+							Values: status.ResourceStatus.Values,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return work
 }

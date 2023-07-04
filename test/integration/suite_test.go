@@ -91,7 +91,8 @@ var _ = ginkgo.BeforeSuite(func() {
 
 	// start hub controller
 	go func() {
-		err := hub.RunWorkHubManager(envCtx, &controllercmd.ControllerContext{
+		o := hub.NewWorkHubManagerOptions()
+		err := o.RunWorkHubManager(envCtx, &controllercmd.ControllerContext{
 			KubeConfig:    cfg,
 			EventRecorder: util.NewIntegrationTestEventRecorder("hub"),
 		})

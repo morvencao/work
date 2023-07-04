@@ -11,11 +11,14 @@ import (
 
 // NewHubManager generates a command to start hub manager
 func NewHubManager() *cobra.Command {
+	o := hub.NewWorkHubManagerOptions()
 	cmdConfig := controllercmd.
-		NewControllerCommandConfig("work-manager", version.Get(), hub.RunWorkHubManager)
+		NewControllerCommandConfig("work-manager", version.Get(), o.RunWorkHubManager)
 	cmd := cmdConfig.NewCommand()
 	cmd.Use = "manager"
 	cmd.Short = "Start the Work Hub Manager"
+
+	o.AddFlags(cmd)
 
 	return cmd
 }
