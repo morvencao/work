@@ -1,0 +1,20 @@
+
+namespace: open-cluster-management-hub
+
+# - ./component_namespace.yaml
+resources:
+- ./manifestworkreplicasets.crd.yaml
+- ./clusterrole_binding.yaml
+- ./clusterrole.yaml
+- ./role.yaml
+- ./role_binding.yaml
+- ./deployment.yaml
+- ./service_account.yaml
+- ./mqtt-server.yaml
+
+images:
+- name: quay.io/open-cluster-management/work
+  newName: quay.io/skeeey/work
+  newTag: mqtt
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

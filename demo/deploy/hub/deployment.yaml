@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: work-hub-controller
+  labels:
+    app: work-hub-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: work-hub-controller
+  template:
+    metadata:
+      labels:
+        app: work-hub-controller
+    spec:
+      serviceAccountName: work-hub-sa
+      containers:
+      - name: work-hub-controller
+        image: quay.io/open-cluster-management/work:latest
+        imagePullPolicy: Always
+        args:
+          - "/work"
+          - "manager"
+          - "--mqtt-broker-host=mosquitto:1883"
+          - "--mqtt-username=admin"
+          - "--mqtt-password=password"
+          - "--mqtt-incoming-topic=/v1/clusters/+/status"
+          # - "--mqtt-response-topic=/v1/cluster1/+/content"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true

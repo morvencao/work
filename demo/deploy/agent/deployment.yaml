@@ -18,12 +18,12 @@ spec:
       containers:
       - name: work-agent
         image: quay.io/open-cluster-management/work:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         args:
           - "/work"
           - "agent"
           - "--spoke-cluster-name=cluster1"
-          - "--mqtt-broker-host=mqttbroker:1883"
+          - "--mqtt-broker-host=172.18.0.2:31320"
           - "--mqtt-incoming-topic=/v1/cluster1/+/content"
           - "--mqtt-response-topic=/v1/clusters/cluster1/status"
           - "--disable-leader-election"
