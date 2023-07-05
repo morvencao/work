@@ -16,7 +16,8 @@ import (
 )
 
 type Decoder interface {
-	Decode(data []byte) (*workv1.ManifestWork, error)
+	DecodeSpec(data []byte) (*workv1.ManifestWork, error)
+	DecodeStatus(data []byte) (*workv1.ManifestWork, error)
 }
 
 type MQTTDecoder struct {
@@ -31,7 +32,7 @@ func NewMQTTDecoder(clusterName string, restMapper meta.RESTMapper) *MQTTDecoder
 	}
 }
 
-func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
+func (d *MQTTDecoder) DecodeSpec(data []byte) (*workv1.ManifestWork, error) {
 	payloadObj := payload.ManifestPayload{}
 	if err := json.Unmarshal(data, &payloadObj); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal payload %s, %v", string(data), err)
@@ -93,5 +94,44 @@ func (d *MQTTDecoder) Decode(data []byte) (*workv1.ManifestWork, error) {
 	}
 
 	work.Spec.ManifestConfigs = []workv1.ManifestConfigOption{manifestConfigOption}
+	return work, nil
+}
+
+func (d *MQTTDecoder) DecodeStatus(data []byte) (*workv1.ManifestWork, error) {
+	payloadObj := payload.ManifestStatus{}
+	if err := json.Unmarshal(data, &payloadObj); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal payload %s, %v", string(data), err)
+	}
+
+	// TODO set the work status from palyload
+	work := &workv1.ManifestWork{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       payloadObj.ResourceName,
+			Namespace:  payloadObj.ClusterName,
+			UID:        types.UID(payloadObj.ResourceID),
+			Generation: payloadObj.ResourceVersion,
+		},
+		Status: workv1.ManifestWorkStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:    payloadObj.ResourceCondition.Type,
+					Status:  metav1.ConditionStatus(payloadObj.ResourceCondition.Status),
+					Reason:  payloadObj.ResourceCondition.Reason,
+					Message: payloadObj.ResourceCondition.Message,
+				},
+			},
+			ResourceStatus: workv1.ManifestResourceStatus{
+				Manifests: []workv1.ManifestCondition{
+					{
+						StatusFeedbacks: workv1.StatusFeedbackResult{
+							Values: payloadObj.ResourceStatus.Values,
+						},
+					},
+				},
+			},
+		},
+	}
+
 	return work, nil
 }

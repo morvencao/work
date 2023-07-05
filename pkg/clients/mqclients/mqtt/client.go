@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -192,47 +191,49 @@ func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) e
 
 	klog.Infof("Subscribed to %s", c.options.IncomingTopic)
 
-	if c.clusterName != "" {
-		for m := range c.msgChan {
-			klog.Infof("payload from MQTT %s", string(m.Payload))
-			work, err := c.decoder.Decode(m.Payload)
-			if err != nil {
-				klog.Errorf("failed to decode payload %s, %v", string(m.Payload), err)
-				continue
-			}
-
-			evt := c.generateEvent(work)
-			if evt == nil {
-				continue
-			}
-
-			klog.Infof("add event to informer %v", evt)
-			receiver.Receive(*evt)
+	for m := range c.msgChan {
+		klog.Infof("payload from MQTT, topic=%s, payload=%s", m.Topic, string(m.Payload))
+		updateStatus := isUpdateStatusTopic(m.Topic)
+		work, err := c.getManifestWork(m.Payload, updateStatus)
+		if err != nil {
+			klog.Errorf("failed to decode payload %s, %v", string(m.Payload), err)
+			continue
 		}
-	} else {
-		for m := range c.msgChan {
-			klog.Infof("payload from MQTT %s", string(m.Payload))
 
-			statusPayload := &payload.ManifestStatus{}
-			if err := json.Unmarshal(m.Payload, statusPayload); err != nil {
-				return fmt.Errorf("failed to unmarshal payload, %v", err)
+		evt := c.generateEvent(work, updateStatus)
+		if evt == nil {
+			continue
+		}
+
+		klog.Infof("add event to informer %v", evt)
+		receiver.Receive(*evt)
+
+		if updateStatus {
+			if _, err := c.pubClient.Publish(ctx, &paho.Publish{
+				Properties: &paho.PublishProperties{
+					CorrelationData: m.Properties.CorrelationData,
+				},
+				Topic: m.Properties.ResponseTopic,
+				// just return 0 to indicate the update success
+				Payload: []byte("{\"code\":0}"),
+			}); err != nil {
+				fmt.Printf("Failed to publish message: %s\n", err)
 			}
-			work := fromStatus(statusPayload)
-
-			evt := &watch.Event{
-				Type:   watch.Modified,
-				Object: work,
-			}
-
-			klog.Infof("add event to informer %v", evt)
-			receiver.Receive(*evt)
 		}
 	}
 
 	return nil
 }
 
-func (c *MQTTClient) generateEvent(work *workv1.ManifestWork) *watch.Event {
+func (c *MQTTClient) generateEvent(work *workv1.ManifestWork, updateStatus bool) *watch.Event {
+	if updateStatus {
+		return c.generateStatusEvent(work)
+	}
+
+	return c.generateSpecEvent(work)
+}
+
+func (c *MQTTClient) generateSpecEvent(work *workv1.ManifestWork) *watch.Event {
 	lastObj, exists, err := c.store.Get(work)
 	if err != nil {
 		klog.Errorf("failed to get the work from store %v", err)
@@ -267,6 +268,38 @@ func (c *MQTTClient) generateEvent(work *workv1.ManifestWork) *watch.Event {
 	work.CreationTimestamp = lastWork.CreationTimestamp
 	work.ResourceVersion = lastWork.ResourceVersion
 	work.Status = lastWork.Status
+
+	return &watch.Event{
+		Type:   watch.Modified,
+		Object: work,
+	}
+}
+
+func (c *MQTTClient) generateStatusEvent(work *workv1.ManifestWork) *watch.Event {
+	lastObj, exists, err := c.store.Get(work)
+	if err != nil {
+		klog.Errorf("failed to get the work from store %v", err)
+		return nil
+	}
+
+	if !exists {
+		// we can ignore here, right?
+		return nil
+	}
+
+	lastWork, ok := lastObj.(*workv1.ManifestWork)
+	if !ok {
+		klog.Errorf("failed to convert store object, %v", lastObj)
+		return nil
+	}
+
+	if !lastWork.DeletionTimestamp.IsZero() {
+		//TODO if the status is delete, delete the status
+		return nil
+	}
+
+	work.ObjectMeta = lastWork.ObjectMeta
+	work.Spec = lastWork.Spec
 
 	return &watch.Event{
 		Type:   watch.Modified,
@@ -346,6 +379,14 @@ func (c *MQTTClient) getConnect(ctx context.Context, sub bool) (*paho.Client, er
 	return client, nil
 }
 
+func (c *MQTTClient) getManifestWork(payload []byte, isStatus bool) (*workv1.ManifestWork, error) {
+	if isStatus {
+		return c.decoder.DecodeStatus(payload)
+	}
+
+	return c.decoder.DecodeSpec(payload)
+}
+
 // TODO aggregate the work status for reconcile status and this should be a common function
 func toStatus(clusterName string, work *workv1.ManifestWork) *payload.ManifestStatus {
 	if !work.DeletionTimestamp.IsZero() && len(work.Finalizers) == 0 {
@@ -404,38 +445,7 @@ func toStatus(clusterName string, work *workv1.ManifestWork) *payload.ManifestSt
 	return status
 }
 
-func fromStatus(status *payload.ManifestStatus) *workv1.ManifestWork {
-	work := &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            status.ResourceName,
-			Namespace:       status.ClusterName,
-			UID:             types.UID(status.ResourceID),
-			ResourceVersion: fmt.Sprintf("%d", status.ResourceVersion),
-			Labels: map[string]string{
-				"work.open-cluster-management.io/manifestworkreplicaset": "default.mwrset-cronjob",
-			},
-		},
-		Spec: workv1.ManifestWorkSpec{},
-		Status: workv1.ManifestWorkStatus{
-			Conditions: []metav1.Condition{
-				{
-					Type:    status.ResourceCondition.Type,
-					Status:  metav1.ConditionStatus(status.ResourceCondition.Status),
-					Reason:  status.ResourceCondition.Reason,
-					Message: status.ResourceCondition.Message,
-				},
-			},
-			ResourceStatus: workv1.ManifestResourceStatus{
-				Manifests: []workv1.ManifestCondition{
-					{
-						StatusFeedbacks: workv1.StatusFeedbackResult{
-							Values: status.ResourceStatus.Values,
-						},
-					},
-				},
-			},
-		},
-	}
+func isUpdateStatusTopic(topic string) bool {
 
-	return work
+	return false
 }
