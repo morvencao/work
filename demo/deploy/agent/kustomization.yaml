@@ -13,11 +13,10 @@ resources:
 - ./clusterrole_binding.yaml
 - ./clusterrole_binding_execution.yaml
 - ./clusterrole_binding_execution-admin.yaml
-- ./mqtt-service.yaml
 - ./deployment.yaml
 
 images:
-- name: quay.io/open-cluster-management/work:latest
+- name: quay.io/open-cluster-management/work
   newName: quay.io/skeeey/work
   newTag: mqtt
 apiVersion: kustomize.config.k8s.io/v1beta1
