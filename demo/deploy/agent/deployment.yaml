@@ -24,6 +24,8 @@ spec:
           - "agent"
           - "--spoke-cluster-name=cluster1"
           - "--mqtt-broker-host=172.18.0.2:31320"
+          - "--mqtt-username=admin"
+          - "--mqtt-password=password"
           - "--mqtt-incoming-topic=/v1/cluster1/+/content"
           - "--mqtt-response-topic=/v1/clusters/cluster1/status"
           - "--disable-leader-election"

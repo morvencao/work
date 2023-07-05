@@ -7,7 +7,21 @@ export IMAGE_NAME=quay.io/skeeey/work:mqtt
 ./setup.sh
 ```
 
-2. Create a manifestworkreplicaset resource:
+2. Check work-hub-manager deployment and logs
+
+```shell
+kubectl --context=kind-hub -n open-cluster-management-hub get deploy work-hub-controller
+kubectl --context=kind-hub -n open-cluster-management-hub logs -f deploy/work-hub-controller
+```
+
+3. Check work-agent deployment and logs:
+
+```shell
+kubectl --context=kind-cluster1 -n open-cluster-management-agent get deploy work-agent
+kubectl --context=kind-cluster1 -n open-cluster-management-agent logs -f deploy/work-agent
+```
+
+4. Create a manifestworkreplicaset resource:
 
 ```shell
 cat << EOF | kubectl --context kind-hub apply -f -
@@ -78,13 +92,18 @@ spec:
 EOF
 ```
 
-3. Check manifestworkreplicaset and manifestwork:
+5. Verify the status of manifestworkreplicaset is updated:
 
 ```shell
 $ kubectl --context kind-hub get mwrs
 NAME             PLACEMENT    FOUND   MANIFESTWORKS   APPLIED
 mwrset-cronjob   AsExpected   True    AsExpected      True
-$ kubectl --context kind-hub get manifestwork -A
-NAMESPACE   NAME             AGE
-cluster1    mwrset-cronjob   26s
+```
+
+6. Verify CronJob is created on managedcluster:
+
+```shell
+$ kubectl --context kind-cluster1 get cronjob
+NAME               SCHEDULE    SUSPEND   ACTIVE   LAST SCHEDULE   AGE
+sync-app-cronjob   * * 1 * *   False     0        <none>          33s
 ```
