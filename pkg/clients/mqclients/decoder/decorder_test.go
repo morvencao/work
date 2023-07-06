@@ -113,7 +113,7 @@ func TestMQTTDecode(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			mqttDecoder := NewMQTTDecoder("test", spoketesting.NewFakeRestMapper())
-			work, err := mqttDecoder.Decode(c.payload)
+			work, err := mqttDecoder.DecodeSpec(c.payload)
 			if err != nil {
 				t.Errorf("%v", err)
 			}

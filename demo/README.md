@@ -46,7 +46,7 @@ spec:
 apiVersion: work.open-cluster-management.io/v1alpha1
 kind: ManifestWorkReplicaSet
 metadata:
-  name: mwrset-cronjob
+  name: mwrset1
   namespace: default
 spec:
   manifestWorkTemplate:
@@ -59,34 +59,37 @@ spec:
         updateStrategy:
           type: Update
         resourceIdentifier:
-          group: batch
-          name: sync-app-cronjob
+          group: apps
+          name: nginx
           namespace: default
-          resource: cronjobs
+          resource: deployments
     deleteOption:
       propagationPolicy: Foreground
     workload:
       manifests:
-        - apiVersion: batch/v1
-          kind: CronJob
+        - apiVersion: apps/v1
+          kind: Deployment
           metadata:
-            name: sync-app-cronjob
+            name: nginx
             namespace: default
+            labels:
+              app: nginx
           spec:
-            schedule: '* * 1 * *'
-            jobTemplate:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
               spec:
-                template:
-                  spec:
-                    containers:
-                    - name: hello
-                      image: busybox:1.28
-                      imagePullPolicy: IfNotPresent
-                      command:
-                        - /bin/sh
-                        - -c
-                        - date; echo Hello from the Kubernetes cluster
-                    restartPolicy: OnFailure
+                containers:
+                - name: nginx
+                  image: nginx:1.14.2
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                  - containerPort: 80
   placementRefs:
     - name: placement1
 EOF
@@ -97,13 +100,13 @@ EOF
 ```shell
 $ kubectl --context kind-hub get mwrs
 NAME             PLACEMENT    FOUND   MANIFESTWORKS   APPLIED
-mwrset-cronjob   AsExpected   True    AsExpected      True
+mwrset1          AsExpected   True    AsExpected      True
 ```
 
 6. Verify CronJob is created on managedcluster:
 
 ```shell
-$ kubectl --context kind-cluster1 get cronjob
-NAME               SCHEDULE    SUSPEND   ACTIVE   LAST SCHEDULE   AGE
-sync-app-cronjob   * * 1 * *   False     0        <none>          33s
+$ kubectl --context kind-cluster1 get deployment
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   1/1     1            1           6m21s
 ```

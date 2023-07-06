@@ -3,6 +3,8 @@ package manifestworkreplicasetcontroller
 import (
 	"context"
 	"fmt"
+	"strconv"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -167,7 +169,11 @@ func CreateManifestWork(mwrSet *workapiv1alpha1.ManifestWorkReplicaSet, clusterN
 
 	resourceVersion, ok := mwrSet.GetAnnotations()[ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey]
 	if ok {
-		work.ResourceVersion = resourceVersion
+		var err error
+		work.Generation, err = strconv.ParseInt(resourceVersion, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("Invalid resource version %s", resourceVersion)
+		}
 	}
 
 	return work, nil

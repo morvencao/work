@@ -15,4 +15,5 @@ type MessageQueueClient interface {
 	PublishStatus(ctx context.Context, work *workv1.ManifestWork) error
 	Subscribe(ctx context.Context, receiver watcher.Receiver) error
 	SetStore(store cache.Store)
+	GetByKey(namespace, name string) (*workv1.ManifestWork, error)
 }
