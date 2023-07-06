@@ -31,7 +31,7 @@ metadata:
   name: placement1
   namespace: default
 spec:
-  numberOfClusters: 
+  numberOfClusters: 2
   clusterSets:
     - default
 ---
