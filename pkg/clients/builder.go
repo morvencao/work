@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
+	"open-cluster-management.io/work/pkg/clients/mqclients"
 	"open-cluster-management.io/work/pkg/clients/mqclients/mqtt"
 	"open-cluster-management.io/work/pkg/clients/watcher"
 	"open-cluster-management.io/work/pkg/clients/workclient"
@@ -18,7 +19,7 @@ import (
 
 type HubWorkClient struct {
 	workClientSet workclientset.Interface
-	mqttClient    *mqtt.MQTTClient
+	mqClient      mqclients.MessageQueueClient
 	hubhash       string
 }
 
@@ -31,8 +32,14 @@ func (c *HubWorkClient) GetHubHash() string {
 }
 
 func (c *HubWorkClient) SetStore(store cache.Store) {
-	if c.mqttClient != nil {
-		c.mqttClient.SetStore(store)
+	if c.mqClient != nil {
+		c.mqClient.SetStore(store)
+	}
+}
+
+func (c *HubWorkClient) Resync(ctx context.Context) {
+	if c.mqClient != nil {
+		c.mqClient.Resync(ctx)
 	}
 }
 
@@ -114,17 +121,20 @@ func (b *HubWorkClientBuilder) newMQTTClient(ctx context.Context) (*HubWorkClien
 		return nil, err
 	}
 
-	// TODO publish resync message
-
 	go func() {
 		mqttClient.Subscribe(ctx, watcher)
 	}()
+
+	// publish resync message
+	// if err := mqttClient.Resync(ctx); err != nil {
+	// 	return nil, err
+	// }
 
 	workClientSet := workclient.NewMQWorkClientSet(mqttClient, watcher)
 
 	return &HubWorkClient{
 		workClientSet: workClientSet,
-		mqttClient:    mqttClient,
+		mqClient:      mqttClient,
 		hubhash:       helper.HubHash(b.mqttOptions.BrokerHost),
 	}, nil
 }

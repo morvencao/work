@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -28,7 +30,6 @@ import (
 	"open-cluster-management.io/api/utils/work/v1/workapplier"
 	workapiv1 "open-cluster-management.io/api/work/v1"
 	workapiv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
-	"strings"
 )
 
 const (
@@ -36,13 +37,6 @@ const (
 	// that owns this manifestwork
 	// TODO move this to the api repo
 	ManifestWorkReplicaSetControllerNameLabelKey = "work.open-cluster-management.io/manifestworkreplicaset"
-
-	// ManifestWorkReplicaSetControllerTemplateHashAnnotationKey is the annotation on ManifestWorkReplicaSet to identify the
-	// manifest template hash
-	ManifestWorkReplicaSetControllerTemplateHashAnnotationKey = "work.open-cluster-management.io/manifestwork-template-hash-resourceversion"
-	// ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey is the annotation on ManifestWorkReplicaSet to identify the
-	// resource version of manifest template
-	ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey = "work.open-cluster-management.io/manifestwork-template-resourceversion"
 
 	// ManifestWorkReplicaSetFinalizer is the name of the finalizer added to ManifestWorkReplicaSet. It is used to ensure
 	// related manifestworks is deleted
@@ -90,7 +84,6 @@ func NewManifestWorkReplicaSetController(
 			&finalizeReconciler{workApplier: workapplier.NewWorkApplierWithTypedClient(workClient, manifestWorkInformer.Lister()),
 				workClient: workReplicaSetClient, manifestWorkLister: manifestWorkInformer.Lister()},
 			&addFinalizerReconciler{workClient: workReplicaSetClient},
-			&resourceVersionReconciler{workClient: workReplicaSetClient},
 			&deployReconciler{workApplier: workapplier.NewWorkApplierWithTypedClient(workClient, manifestWorkInformer.Lister()),
 				manifestWorkLister: manifestWorkInformer.Lister(), placementLister: placementInformer.Lister(), placeDecisionLister: placeDecisionInformer.Lister()},
 			&statusReconciler{manifestWorkLister: manifestWorkInformer.Lister()},

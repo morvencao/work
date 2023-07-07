@@ -266,6 +266,9 @@ func (o *WorkloadAgentOptions) RunWorkloadAgent(ctx context.Context, controllerC
 	go manifestWorkFinalizeController.Run(ctx, manifestWorkFinalizeControllerWorkers)
 	go availableStatusController.Run(ctx, availableStatusControllerWorkers)
 
+	// TODO need wait informers is synced?
+	hubWorkClientHolder.Resync(ctx)
+
 	if len(o.MemProfileFile) != 0 {
 		// wait all controllers are started
 		time.Sleep(30 * time.Second)

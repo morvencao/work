@@ -2,8 +2,9 @@ package hub
 
 import (
 	"context"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
@@ -91,7 +92,11 @@ func (o *WorkHubManagerOptions) RunWorkHubManager(ctx context.Context, controlle
 	go clusterInformerFactory.Start(ctx.Done())
 	go workInformerFactory.Start(ctx.Done())
 	go manifestWorkInformerFactory.Start(ctx.Done())
+
 	go manifestWorkReplicaSetController.Run(ctx, 5)
+
+	// TODO need wait informers is synced?
+	hubWorkClientHolder.Resync(ctx)
 
 	<-ctx.Done()
 	return nil

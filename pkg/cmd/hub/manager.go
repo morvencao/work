@@ -20,5 +20,9 @@ func NewHubManager() *cobra.Command {
 
 	o.AddFlags(cmd)
 
+	// add disable leader election flag
+	flags := cmd.Flags()
+	flags.BoolVar(&cmdConfig.DisableLeaderElection, "disable-leader-election", false, "Disable leader election for the manager.")
+
 	return cmd
 }

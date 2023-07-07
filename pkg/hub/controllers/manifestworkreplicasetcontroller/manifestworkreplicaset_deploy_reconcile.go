@@ -3,7 +3,6 @@ package manifestworkreplicasetcontroller
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -36,7 +35,7 @@ func (d *deployReconciler) reconcile(ctx context.Context, mwrSet *workapiv1alpha
 			if errors.IsNotFound(err) {
 				apimeta.SetStatusCondition(&mwrSet.Status.Conditions, GetPlacementDecisionVerified(workapiv1alpha1.ReasonPlacementDecisionNotFound, ""))
 			}
-			return mwrSet, reconcileContinue, fmt.Errorf("Failed get placement %w", err)
+			return mwrSet, reconcileContinue, fmt.Errorf("failed get placement %w", err)
 		}
 		placements = append(placements, placement)
 	}
@@ -155,25 +154,17 @@ func getCondition(conditionType string, reason string, message string, status me
 
 func CreateManifestWork(mwrSet *workapiv1alpha1.ManifestWorkReplicaSet, clusterNS string) (*workv1.ManifestWork, error) {
 	if clusterNS == "" {
-		return nil, fmt.Errorf("Invalid cluster namespace")
+		return nil, fmt.Errorf("invalid cluster namespace")
 	}
 
 	work := &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      mwrSet.Name,
-			Namespace: clusterNS,
-			Labels:    map[string]string{ManifestWorkReplicaSetControllerNameLabelKey: manifestWorkReplicaSetKey(mwrSet)},
+			Name:        mwrSet.Name,
+			Namespace:   clusterNS,
+			Labels:      map[string]string{ManifestWorkReplicaSetControllerNameLabelKey: manifestWorkReplicaSetKey(mwrSet)},
+			Annotations: map[string]string{"manifestworkreplicaset-generation": fmt.Sprintf("%d", mwrSet.Generation)},
 		},
 		Spec: mwrSet.Spec.ManifestWorkTemplate,
-	}
-
-	resourceVersion, ok := mwrSet.GetAnnotations()[ManifestWorkReplicaSetControllerTemplateResourceVersionAnnotationKey]
-	if ok {
-		var err error
-		work.Generation, err = strconv.ParseInt(resourceVersion, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("Invalid resource version %s", resourceVersion)
-		}
 	}
 
 	return work, nil

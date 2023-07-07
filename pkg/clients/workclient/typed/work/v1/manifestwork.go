@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/google/uuid"
@@ -16,6 +15,7 @@ import (
 	"k8s.io/klog/v2"
 	workv1client "open-cluster-management.io/api/client/work/clientset/versioned/typed/work/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	"open-cluster-management.io/work/pkg/clients/mqclients/encoder"
 )
 
 // MQManifestWorks implements ManifestWorkInterface
@@ -38,19 +38,24 @@ func (mw *MQManifestWorks) Create(ctx context.Context, manifestWork *workv1.Mani
 	mw.client.Lock()
 	defer mw.client.Unlock()
 
-	addedObj := manifestWork.DeepCopy()
+	resourceVersion, ok := manifestWork.Annotations["manifestworkreplicaset-generation"]
+	if !ok {
+		return nil, fmt.Errorf("manifestworkreplicaset generation is required")
+	}
 
+	addedObj := manifestWork.DeepCopy()
 	// generate with UUID v5 based on work name and namespace to make sure uid is not changed across restart
 	// TODO: replace uuid.NameSpaceOID with UUID of managed cluster
 	uid := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s-%s-%s", addedObj.GroupVersionKind().String(), addedObj.Namespace, addedObj.Name))).String()
 	addedObj.UID = types.UID(uid)
+	addedObj.ResourceVersion = resourceVersion
 
-	if err := mw.client.mqClient.PublishSpec(ctx, addedObj); err != nil {
+	if err := mw.client.mqClient.Publish(ctx, addedObj); err != nil {
 		klog.Errorf("failed to publish manifestwork spec, %v", err)
 		return nil, err
 	}
 
-	klog.Infof("creating manifest work")
+	klog.Infof("Creating manifest work %v", addedObj.ObjectMeta)
 	mw.client.watcher.Receive(watch.Event{
 		Type:   watch.Added,
 		Object: addedObj,
@@ -64,17 +69,16 @@ func (mw *MQManifestWorks) Update(ctx context.Context, manifestWork *workv1.Mani
 	defer mw.client.Unlock()
 
 	updatedObj := manifestWork.DeepCopy()
-	updatedObj.ResourceVersion = mw.addResourceVersion(updatedObj.ResourceVersion)
 
 	// the manifest work is deleting and its finalizers are removed, delete it safely
 	if !updatedObj.DeletionTimestamp.IsZero() && len(updatedObj.Finalizers) == 0 {
-		if err := mw.client.mqClient.PublishStatus(ctx, updatedObj); err != nil {
+		if err := mw.client.mqClient.Publish(ctx, updatedObj); err != nil {
 			// TODO think about how to handle this error
 			klog.Errorf("failed to update status, %v", err)
 			return manifestWork, nil
 		}
 
-		klog.Infof("deleting manifest work")
+		klog.Infof("Deleting manifest work, %v", updatedObj.ObjectMeta)
 		mw.client.watcher.Receive(watch.Event{
 			Type:   watch.Deleted,
 			Object: updatedObj,
@@ -83,7 +87,7 @@ func (mw *MQManifestWorks) Update(ctx context.Context, manifestWork *workv1.Mani
 		return updatedObj, nil
 	}
 
-	klog.Infof("updating manifest work")
+	klog.Infof("Updating manifest work, %v", updatedObj.ObjectMeta)
 	mw.client.watcher.Receive(watch.Event{
 		Type:   watch.Modified,
 		Object: updatedObj,
@@ -97,15 +101,19 @@ func (mw *MQManifestWorks) UpdateStatus(ctx context.Context, manifestWork *workv
 	defer mw.client.Unlock()
 
 	updatedObj := manifestWork.DeepCopy()
-	updatedObj.ResourceVersion = mw.addResourceVersion(updatedObj.ResourceVersion)
+	hash, err := encoder.GetStatusHash(updatedObj)
+	if err != nil {
+		return nil, err
+	}
 
-	klog.Infof("updating manifest work status")
-	if err := mw.client.mqClient.PublishStatus(ctx, updatedObj); err != nil {
+	updatedObj.Annotations = map[string]string{"statushash": hash}
+	if err := mw.client.mqClient.Publish(ctx, updatedObj); err != nil {
 		// TODO think about how to handle this error
 		klog.Errorf("failed to update status, %v", err)
 		return manifestWork, nil
 	}
 
+	klog.Infof("Updating manifest work status, %v", updatedObj.ObjectMeta)
 	mw.client.watcher.Receive(watch.Event{
 		Type:   watch.Modified,
 		Object: updatedObj,
@@ -124,32 +132,25 @@ func (mw *MQManifestWorks) Delete(ctx context.Context, name string, opts metav1.
 		return err
 	}
 
+	// actual deletion should be done after hub receive delete status
 	deletedObj := manifestWork.DeepCopy()
 	now := metav1.Now()
 	deletedObj.DeletionTimestamp = &now
-	deletedObj.ResourceVersion = mw.addResourceVersion(deletedObj.ResourceVersion)
-	if err := mw.client.mqClient.PublishSpec(ctx, deletedObj); err != nil {
+	if err := mw.client.mqClient.Publish(ctx, deletedObj); err != nil {
 		klog.Errorf("failed to publish manifestwork spec, %v", err)
 		return err
 	}
-
-	// actual deletion should be done after hub receive delete status
-	// klog.Infof("deleting manifest work")
-	// mw.client.watcher.Receive(watch.Event{
-	// 	Type:   watch.Deleted,
-	// 	Object: deletedObj,
-	// })
 
 	return nil
 }
 
 func (mw *MQManifestWorks) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
-	klog.Infof("deleting manifest work collection")
+	klog.Infof("TODO deleting manifest work collection")
 	return nil
 }
 
 func (mw *MQManifestWorks) Get(ctx context.Context, name string, opts metav1.GetOptions) (*workv1.ManifestWork, error) {
-	klog.Infof("getting manifest work")
+	klog.Infof("Getting manifest work")
 	manifestWork, err := mw.client.mqClient.GetByKey(mw.namespace, name)
 	if err != nil {
 		return nil, err
@@ -159,12 +160,12 @@ func (mw *MQManifestWorks) Get(ctx context.Context, name string, opts metav1.Get
 }
 
 func (mw *MQManifestWorks) List(ctx context.Context, opts metav1.ListOptions) (*workv1.ManifestWorkList, error) {
-	klog.Infof("listing manifest work")
+	klog.Infof("TODO Listing manifest work")
 	return &workv1.ManifestWorkList{}, nil
 }
 
 func (mw *MQManifestWorks) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
-	klog.Infof("watching manifest work")
+	klog.Infof("Watching manifest work")
 	return mw.client.watcher, nil
 }
 
@@ -184,7 +185,7 @@ func (mw *MQManifestWorks) Patch(ctx context.Context, name string, pt types.Patc
 		return nil, err
 	}
 
-	patchedManifestWorkJSON := []byte{}
+	var patchedManifestWorkJSON []byte
 	// Apply the patch based on the patch type
 	switch pt {
 	case types.JSONPatchType:
@@ -196,19 +197,16 @@ func (mw *MQManifestWorks) Patch(ctx context.Context, name string, pt types.Patc
 		if err != nil {
 			return nil, err
 		}
-
 	case types.MergePatchType:
 		patchedManifestWorkJSON, err = strategicpatch.StrategicMergePatch(existingJSON, data, workv1.ManifestWork{})
 		if err != nil {
 			return nil, err
 		}
-
 	case types.StrategicMergePatchType:
 		patchedManifestWorkJSON, err = strategicpatch.StrategicMergePatch(existingJSON, data, workv1.ManifestWork{})
 		if err != nil {
 			return nil, err
 		}
-
 	default:
 		return nil, fmt.Errorf("unsupported patch type: %s", pt)
 	}
@@ -218,29 +216,22 @@ func (mw *MQManifestWorks) Patch(ctx context.Context, name string, pt types.Patc
 		return nil, err
 	}
 
-	patchedManifestWork.ResourceVersion = mw.addResourceVersion(patchedManifestWork.ResourceVersion)
-	// workapplier doesn't update the generation, do it here
-	patchedManifestWork.Generation = patchedManifestWork.Generation + 1
-	if err := mw.client.mqClient.PublishSpec(ctx, patchedManifestWork); err != nil {
+	currentResoureVersion, ok := patchedManifestWork.Annotations["manifestworkreplicaset-generation"]
+	if !ok {
+		return nil, fmt.Errorf("manifestworkreplicaset generation is required")
+	}
+
+	patchedManifestWork.ResourceVersion = currentResoureVersion
+	if err := mw.client.mqClient.Publish(ctx, patchedManifestWork); err != nil {
 		klog.Errorf("failed to publish manifestwork spec, %v", err)
 		return nil, err
 	}
 
-	klog.Infof("patching manifest work")
+	klog.Infof("Patching manifest work %v", patchedManifestWork.ObjectMeta)
 	mw.client.watcher.Receive(watch.Event{
 		Type:   watch.Modified,
 		Object: patchedManifestWork,
 	})
 
 	return patchedManifestWork, nil
-}
-
-func (mw *MQManifestWorks) addResourceVersion(resouceVersion string) string {
-	if len(resouceVersion) == 0 {
-		return fmt.Sprintf("%d", 0)
-	}
-
-	newResouceVersion, _ := strconv.ParseInt(resouceVersion, 10, 64)
-	newResouceVersion = newResouceVersion + 1
-	return fmt.Sprintf("%d", newResouceVersion)
 }
