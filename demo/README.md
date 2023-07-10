@@ -20,7 +20,9 @@ kubectl --context=kind-hub -n open-cluster-management-hub logs -f deploy/work-hu
 
 ```shell
 kubectl --context=kind-cluster1 -n open-cluster-management-agent get deploy work-agent
-kubectl --context=kind-cluster1 -n open-cluster-management-agent logs -f deploy/work-agent
+kubectl --context=kind-cluster1 -n open-cluster-management-agent logs deploy/work-agent
+kubectl --context=kind-cluster2 -n open-cluster-management-agent get deploy work-agent
+kubectl --context=kind-cluster2 -n open-cluster-management-agent logs deploy/work-agent
 ```
 
 ## Create manifestworkreplicaset
@@ -28,9 +30,7 @@ kubectl --context=kind-cluster1 -n open-cluster-management-agent logs -f deploy/
 1. Create a manifestworkreplicaset resource:
 
 ```shell
-export KUBECONFIG=~/.kube/config
-kubectl config use-context kind-hub
-go run ./demo/resource/main.go -mwrsname=mwrset1
+kubectl --context kind-hub apply -f resource/manifestworkreplicaset.yaml
 ```
 
 2. Verify the status of manifestworkreplicaset is updated:
@@ -41,12 +41,15 @@ NAME             PLACEMENT    FOUND   MANIFESTWORKS   APPLIED
 mwrset1          AsExpected   True    AsExpected      True
 ```
 
-3. Verify deploy is created on spoke cluster:
+3. Verify deployments are created on spoke clusters:
 
 ```shell
 $ kubectl --context kind-cluster1 get deploy
-NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE
-busybox-481505d79d86c45f89a02473b6530932   0/1     1            0           29s
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   0/1     1            0           17s
+$ kubectl --context kind-cluster2 get deploy
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   0/1     1            0           20s
 ```
 
 ## Update manifestworkreplicaset
@@ -54,15 +57,18 @@ busybox-481505d79d86c45f89a02473b6530932   0/1     1            0           29s
 1. Add more replicas by updating the manifestworkreplicaset resource:
 
 ```shell
-go run ./demo/resource/main.go -mwrsname=mwrset1 -replicas 2
+sed "s|replicas: 1|replicas: 2|g" resource/manifestworkreplicaset.yaml | kubectl --context kind-hub apply -f -
 ```
 
-2. Verify deploy is updated on spoke cluster:
+2. Verify deployments are updated on spoke clusters:
 
 ```shell
 $ kubectl --context kind-cluster1 get deploy
-NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE
-busybox-481505d79d86c45f89a02473b6530932   0/2     2            0           66s
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   0/2     2            0           1m34s
+$ kubectl --context kind-cluster2 get deploy
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   0/2     2            0           1m39s
 ```
 
 ## Delete manifestworkreplicaset
@@ -70,12 +76,14 @@ busybox-481505d79d86c45f89a02473b6530932   0/2     2            0           66s
 1. Delete the manifestworkreplicaset resource:
 
 ```shell
-go run ./demo/resource/main.go -mwrsname=mwrset1 -delete=true
+kubectl --context kind-hub delete mwrs mwrset1
 ```
 
-2. Verify deploy is deleted on spoke cluster:
+2. Verify deployments are deleted on spoke clusters:
 
 ```shell
 $ kubectl --context kind-cluster1 get deploy
+No resources found in default namespace.
+$ kubectl --context kind-cluster2 get deploy
 No resources found in default namespace.
 ```

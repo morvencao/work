@@ -1,0 +1,68 @@
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement1
+  namespace: default
+spec:
+  numberOfClusters:
+  clusterSets:
+    - default
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: default
+  namespace: default
+spec:
+  clusterSet: default
+---
+apiVersion: work.open-cluster-management.io/v1alpha1
+kind: ManifestWorkReplicaSet
+metadata:
+  name: mwrset1
+  namespace: default
+spec:
+  manifestWorkTemplate:
+    manifestConfigs:
+      - feedbackRules:
+          - jsonPaths:
+              - name: lastSuccessfulTime
+                path: .status.lastSuccessfulTime
+            type: JSONPaths
+        updateStrategy:
+          type: Update
+        resourceIdentifier:
+          group: apps
+          name: nginx
+          namespace: default
+          resource: deployments
+    deleteOption:
+      propagationPolicy: Foreground
+    workload:
+      manifests:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            namespace: default
+            labels:
+              app: nginx
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                - name: nginx
+                  image: nginx:1.14.2
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                  - containerPort: 80
+  placementRefs:
+    - name: placement1
