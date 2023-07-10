@@ -2,11 +2,12 @@ package manifestworkreplicasetcontroller
 
 import (
 	"context"
+	"testing"
+
 	"golang.org/x/exp/slices"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fakeclient "open-cluster-management.io/api/client/work/clientset/versioned/fake"
 	helpertest "open-cluster-management.io/work/pkg/hub/test"
-	"testing"
 )
 
 // Test add finalizer reconcile
@@ -53,7 +54,7 @@ func TestAddFinalizerTwiceReconcile(t *testing.T) {
 		workClient: fakeClient,
 	}
 
-	mwrSetTest, _, err := addFinalizerController.reconcile(context.TODO(), mwrSetTest)
+	_, _, err := addFinalizerController.reconcile(context.TODO(), mwrSetTest)
 	if err != nil {
 		t.Fatal(err)
 	}

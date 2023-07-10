@@ -1,8 +1,10 @@
 package encoder
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	workv1 "open-cluster-management.io/api/work/v1"
@@ -26,22 +28,34 @@ func NewMQTTEncoder(clusterName string) *MQTTEncoder {
 }
 
 func (e *MQTTEncoder) EncodeSpec(work *workv1.ManifestWork) ([]byte, error) {
-	resourceVersion := int64(1)
-	if work.Generation > 0 {
-		resourceVersion = work.Generation
-	}
-
 	manifest := map[string]any{}
 	// TODO: handle multiple resources in a manifestwork
 	if len(work.Spec.Workload.Manifests) > 0 {
 		if err := json.Unmarshal(work.Spec.Workload.Manifests[0].Raw, &manifest); err != nil {
-			return nil, fmt.Errorf("Failed to unmarshal manifests %v", err)
+			return nil, fmt.Errorf("failed to unmarshal manifests, %v", err)
 		}
+	}
+
+	resourceVersion, err := strconv.ParseInt(work.ResourceVersion, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse resource version, %v", err)
+	}
+
+	if !work.DeletionTimestamp.IsZero() {
+		manifestPayload := &payload.ManifestPayload{
+			ResourceName:      work.Name,
+			ResourceID:        string(work.UID),
+			ResourceVersion:   resourceVersion,
+			DeletionTimestamp: work.DeletionTimestamp,
+		}
+
+		return json.Marshal(manifestPayload)
 	}
 
 	updateStrategy := &workv1.UpdateStrategy{
 		Type: workv1.UpdateStrategyTypeUpdate,
 	}
+
 	statusFeedbackRules := []workv1.FeedbackRule{
 		{
 			Type: workv1.WellKnownStatusType,
@@ -69,19 +83,30 @@ func (e *MQTTEncoder) EncodeSpec(work *workv1.ManifestWork) ([]byte, error) {
 		DeletePolicy:        deletePolicy,
 	}
 
-	if !work.DeletionTimestamp.IsZero() {
-		manifestPayload.DeletionTimestamp = work.DeletionTimestamp
-	}
-
 	return json.Marshal(manifestPayload)
 }
 
 func (e *MQTTEncoder) EncodeStatus(work *workv1.ManifestWork) ([]byte, error) {
+	status, err := ToAggregatedStatus(work)
+	if err != nil {
+		return nil, err
+	}
+
+	status.ResourceStatusHash = work.Annotations["statushash"]
+	return json.Marshal(status)
+}
+
+func ToAggregatedStatus(work *workv1.ManifestWork) (*payload.ManifestStatus, error) {
+	resourceVersion, err := strconv.ParseInt(work.ResourceVersion, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse resource version, %v", err)
+	}
+
 	statusPayload := &payload.ManifestStatus{
-		ClusterName:     e.clusterName,
+		ClusterName:     work.Namespace,
 		ResourceName:    work.Name,
 		ResourceID:      string(work.UID),
-		ResourceVersion: work.Generation,
+		ResourceVersion: resourceVersion,
 	}
 
 	switch {
@@ -90,14 +115,14 @@ func (e *MQTTEncoder) EncodeStatus(work *workv1.ManifestWork) ([]byte, error) {
 			Type:    payload.ResourceConditionTypeDeleted,
 			Status:  "True",
 			Reason:  "Deleted",
-			Message: fmt.Sprintf("The resouce is deleted from the cluster %s", e.clusterName),
+			Message: fmt.Sprintf("The resouce is deleted from the cluster %s", work.Namespace),
 		}
 	case meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkAvailable):
 		statusPayload.ResourceCondition = payload.ResourceCondition{
 			Type:    payload.ResourceConditionTypeAvailable,
 			Status:  "True",
 			Reason:  "Available",
-			Message: fmt.Sprintf("The resouce is available on the cluster %s", e.clusterName),
+			Message: fmt.Sprintf("The resouce is available on the cluster %s", work.Namespace),
 		}
 		if len(work.Status.ResourceStatus.Manifests) != 0 && len(work.Status.ResourceStatus.Manifests[0].StatusFeedbacks.Values) != 0 {
 			statusPayload.ResourceStatus = payload.ResourceStatus{
@@ -109,16 +134,29 @@ func (e *MQTTEncoder) EncodeStatus(work *workv1.ManifestWork) ([]byte, error) {
 			Type:    payload.ResourceConditionTypeApplied,
 			Status:  "True",
 			Reason:  "Applied",
-			Message: fmt.Sprintf("The resouce is applied on the cluster %s", e.clusterName),
+			Message: fmt.Sprintf("The resouce is applied on the cluster %s", work.Namespace),
 		}
 	default:
 		statusPayload.ResourceCondition = payload.ResourceCondition{
 			Type:    payload.ResourceConditionTypeApplied,
 			Status:  "False",
 			Reason:  "Progressing",
-			Message: fmt.Sprintf("The resouce is in the progress to be applied on the cluster %s", e.clusterName),
+			Message: fmt.Sprintf("The resouce is in the progress to be applied on the cluster %s", work.Namespace),
 		}
 	}
 
-	return json.Marshal(statusPayload)
+	return statusPayload, nil
+}
+
+func GetStatusHash(work *workv1.ManifestWork) (string, error) {
+	status, err := ToAggregatedStatus(work)
+	if err != nil {
+		return "", err
+	}
+
+	statusBytes, err := json.Marshal(status)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(statusBytes)), nil
 }

@@ -22,11 +22,14 @@ spec:
         args:
           - "/work"
           - "manager"
+          - "--disable-leader-election"
           - "--mqtt-broker-host=mosquitto:1883"
           - "--mqtt-username=admin"
           - "--mqtt-password=password"
-          - "--mqtt-incoming-topic=/v1/clusters/+/status"
-          # - "--mqtt-response-topic=/v1/cluster1/+/content"
+          - "--mqtt-sub-topic=clusters/+/status"
+          - "--mqtt-pub-topic=clusters/+/content"
+          - "--mqtt-resync-request-topic=resync/clusters/status"
+          - "--mqtt-resync-response-topic=resync/+/content"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

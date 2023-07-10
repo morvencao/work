@@ -41,10 +41,11 @@ func (d *MQTTDecoder) DecodeSpec(data []byte) (*workv1.ManifestWork, error) {
 	work := &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       payloadObj.ResourceName,
-			Namespace:  d.clusterName,
-			UID:        types.UID(payloadObj.ResourceID),
-			Generation: payloadObj.ResourceVersion,
+			Name:            payloadObj.ResourceName,
+			Namespace:       d.clusterName,
+			UID:             types.UID(payloadObj.ResourceID),
+			ResourceVersion: fmt.Sprintf("%d", payloadObj.ResourceVersion),
+			Generation:      payloadObj.ResourceVersion,
 		},
 	}
 
@@ -103,14 +104,17 @@ func (d *MQTTDecoder) DecodeStatus(data []byte) (*workv1.ManifestWork, error) {
 		return nil, fmt.Errorf("failed to unmarshal payload %s, %v", string(data), err)
 	}
 
-	// TODO set the work status from palyload
 	work := &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       payloadObj.ResourceName,
-			Namespace:  payloadObj.ClusterName,
-			UID:        types.UID(payloadObj.ResourceID),
-			Generation: payloadObj.ResourceVersion,
+			Name:            payloadObj.ResourceName,
+			Namespace:       payloadObj.ClusterName,
+			UID:             types.UID(payloadObj.ResourceID),
+			ResourceVersion: fmt.Sprintf("%d", payloadObj.ResourceVersion),
+			Generation:      payloadObj.ResourceVersion,
+			Annotations: map[string]string{
+				"statushash": payloadObj.ResourceStatusHash,
+			},
 		},
 		Status: workv1.ManifestWorkStatus{
 			Conditions: []metav1.Condition{

@@ -25,12 +25,13 @@ type ManifestPayload struct {
 }
 
 type ManifestStatus struct {
-	ClusterName       string            `json:"clusterName,omitempty"`
-	ResourceName      string            `json:"resourceName,omitempty"`
-	ResourceID        string            `json:"resourceID,omitempty"`
-	ResourceVersion   int64             `json:"resourceVersion,omitempty"`
-	ResourceCondition ResourceCondition `json:"resourceCondition,omitempty"`
-	ResourceStatus    ResourceStatus    `json:"resourceStatus,omitempty"`
+	ClusterName        string            `json:"clusterName,omitempty"`
+	ResourceName       string            `json:"resourceName,omitempty"`
+	ResourceID         string            `json:"resourceID,omitempty"`
+	ResourceStatusHash string            `json:"resourceStatusHash,omitempty"`
+	ResourceVersion    int64             `json:"resourceVersion,omitempty"`
+	ResourceCondition  ResourceCondition `json:"resourceCondition,omitempty"`
+	ResourceStatus     ResourceStatus    `json:"resourceStatus,omitempty"`
 }
 
 type ResourceCondition struct {

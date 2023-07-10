@@ -1,0 +1,40 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: work-agent
+  labels:
+    app: work-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: work-agent
+  template:
+    metadata:
+      labels:
+        app: work-agent
+    spec:
+      serviceAccountName: work-agent-sa
+      containers:
+      - name: work-agent
+        image: quay.io/open-cluster-management/work:latest
+        imagePullPolicy: Always
+        args:
+          - "/work"
+          - "agent"
+          - "--spoke-cluster-name=cluster1"
+          - "--disable-leader-election"
+          - "--mqtt-broker-host=172.18.0.2:31320"
+          - "--mqtt-username=admin"
+          - "--mqtt-password=password"
+          - "--mqtt-sub-topic=clusters/cluster1/content"
+          - "--mqtt-pub-topic=clusters/cluster1/status"
+          - "--mqtt-resync-request-topic=resync/cluster1/content"
+          - "--mqtt-resync-response-topic=resync/clusters/status"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
