@@ -364,6 +364,7 @@ func (c *MQTTClient) generateStatusEvent(work *workv1.ManifestWork) *watch.Event
 
 	if meta.IsStatusConditionTrue(work.Status.Conditions, payload.ResourceConditionTypeDeleted) {
 		work.Finalizers = []string{}
+		klog.Infof("Deleting manifestwork %s/%s", work.Namespace, work.Name)
 		return &watch.Event{
 			Type:   watch.Deleted,
 			Object: work,
