@@ -72,6 +72,13 @@ func (mw *MQManifestWorks) Update(ctx context.Context, manifestWork *workv1.Mani
 
 	// the manifest work is deleting and its finalizers are removed, delete it safely
 	if !updatedObj.DeletionTimestamp.IsZero() && len(updatedObj.Finalizers) == 0 {
+		// update status hash to make sure hub can receive the delete status
+		hash, err := encoder.GetStatusHash(updatedObj)
+		if err != nil {
+			return nil, err
+		}
+		updatedObj.Annotations = map[string]string{"statushash": hash}
+
 		if err := mw.client.mqClient.Publish(ctx, updatedObj); err != nil {
 			// TODO think about how to handle this error
 			klog.Errorf("failed to update status, %v", err)
