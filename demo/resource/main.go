@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"path"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -98,9 +99,20 @@ func main() {
 	mwrsName := flag.String("mwrsname", "", "name of manifestworkreplicasets")
 	replicas := flag.Int("replicas", 1, "deployment replicas")
 	delete := flag.Bool("delete", false, "delete all manifestworkreplicasets")
+	force := flag.Bool("force", false, "force delete all manifestworkreplicasets")
 	flag.Parse()
 
-	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	kubeConfigFile := os.Getenv("KUBECONFIG")
+	if len(kubeConfigFile) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		kubeConfigFile = path.Join(home, ".kube", "config")
+	}
+
+	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -131,13 +143,19 @@ func main() {
 				log.Fatal(err)
 			}
 
-			mwrs, err := mwrsClient.Get(ctx, mwrs.Name, metav1.GetOptions{})
-			if err == nil {
-				mwrs.Finalizers = []string{}
-				_, err = mwrsClient.Update(ctx, mwrs, metav1.UpdateOptions{})
-				if err != nil {
-					log.Fatal(err)
+			log.Printf("the ManifestWorkReplicaSet %s is deleted\n", mwrs.Name)
+
+			if *force {
+				mwrs, err := mwrsClient.Get(ctx, mwrs.Name, metav1.GetOptions{})
+				if err == nil {
+					mwrs.Finalizers = []string{}
+					_, err = mwrsClient.Update(ctx, mwrs, metav1.UpdateOptions{})
+					if err != nil {
+						log.Fatal(err)
+					}
 				}
+
+				log.Printf("the ManifestWorkReplicaSet %s finalizers are removed\n", mwrs.Name)
 			}
 		}
 
@@ -202,6 +220,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		log.Printf("the ManifestWorkReplicaSet %s is created\n", name)
 		return
 	}
 
@@ -214,4 +233,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Printf("the ManifestWorkReplicaSet %s is updated\n", name)
 }
