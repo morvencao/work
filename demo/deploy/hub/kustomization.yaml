@@ -1,11 +1,11 @@
 
 namespace: open-cluster-management-hub
 
-# - ./component_namespace.yaml
 resources:
 - ./crds/manifestworkreplicasets.crd.yaml
 - ./crds/placementdecisions.crd.yaml
 - ./crds/placements.crd.yaml
+- ./component_namespace.yaml
 - ./clusterrole_binding.yaml
 - ./clusterrole.yaml
 - ./role.yaml

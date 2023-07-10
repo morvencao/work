@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -183,8 +185,10 @@ func main() {
 		name = *mwrsName
 	}
 
-	deploy := newDeployment("busybos-"+rand.String(5), int32(*replicas))
-	work := newManifestWork("cluster1", "work-"+rand.String(5), deploy)
+	// make sure generated deployment name is not changed for the ManifestWorkReplicaSet
+	mwrsNameHash := fmt.Sprintf("%x", md5.Sum([]byte(name)))
+	deploy := newDeployment("busybox-"+mwrsNameHash, int32(*replicas))
+	work := newManifestWork("cluster1", "work-"+mwrsNameHash, deploy)
 	mwrs := &workapiv1alpha1.ManifestWorkReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
