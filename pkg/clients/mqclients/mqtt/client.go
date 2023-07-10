@@ -502,7 +502,7 @@ func (c *MQTTClient) generateResyncRequest(resourceType string) []byte {
 }
 
 func (c *MQTTClient) resyncManifestworks(ctx context.Context, resyncType, clusterName string, m *paho.Publish) error {
-	//TODO need wait the cache is ready? how can get a ready cache?
+	//TODO need wait the cache is ready? how can we get a ready cache?
 	if c.store == nil {
 		return nil
 	}
@@ -531,6 +531,7 @@ func (c *MQTTClient) resyncSpecs(ctx context.Context, clusterName string, payloa
 		return
 	}
 
+	// TODO handle the manifestworks do not exist in the hub, but exist in the spoke
 	works := c.store.List()
 	for _, workObj := range works {
 		work, ok := workObj.(*workv1.ManifestWork)
@@ -544,6 +545,7 @@ func (c *MQTTClient) resyncSpecs(ctx context.Context, clusterName string, payloa
 
 		resourceVersion, ok := resourceVersions[string(work.UID)]
 		if !ok {
+			// a manifestwork that does not exist in the spoke
 			resourceVersion = "0"
 		}
 
@@ -595,6 +597,7 @@ func (c *MQTTClient) resyncStatus(ctx context.Context, payload []byte) {
 
 		lastHash, ok := statusHashes[string(work.UID)]
 		if !ok {
+			// TODO consider how to delete the manifestwork
 			// the work is not in this cluster, do nothing
 			continue
 		}
