@@ -28,14 +28,6 @@ func NewMQTTEncoder(clusterName string) *MQTTEncoder {
 }
 
 func (e *MQTTEncoder) EncodeSpec(work *workv1.ManifestWork) ([]byte, error) {
-	manifest := map[string]any{}
-	// TODO: handle multiple resources in a manifestwork
-	if len(work.Spec.Workload.Manifests) > 0 {
-		if err := json.Unmarshal(work.Spec.Workload.Manifests[0].Raw, &manifest); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal manifests, %v", err)
-		}
-	}
-
 	resourceVersion, err := strconv.ParseInt(work.ResourceVersion, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse resource version, %v", err)
@@ -52,35 +44,13 @@ func (e *MQTTEncoder) EncodeSpec(work *workv1.ManifestWork) ([]byte, error) {
 		return json.Marshal(manifestPayload)
 	}
 
-	updateStrategy := &workv1.UpdateStrategy{
-		Type: workv1.UpdateStrategyTypeUpdate,
-	}
-
-	statusFeedbackRules := []workv1.FeedbackRule{
-		{
-			Type: workv1.WellKnownStatusType,
-		},
-	}
-
-	if len(work.Spec.ManifestConfigs) > 0 {
-		updateStrategy = work.Spec.ManifestConfigs[0].UpdateStrategy
-		if len(work.Spec.ManifestConfigs[0].FeedbackRules) > 0 {
-			statusFeedbackRules = work.Spec.ManifestConfigs[0].FeedbackRules
-		}
-	}
-
-	deletePolicy := workv1.DeletePropagationPolicyTypeForeground
-	if work.Spec.DeleteOption != nil {
-		deletePolicy = work.Spec.DeleteOption.PropagationPolicy
-	}
 	manifestPayload := &payload.ManifestPayload{
-		ResourceName:        work.Name,
-		ResourceID:          string(work.UID),
-		ResourceVersion:     resourceVersion,
-		Manifest:            manifest,
-		StatusFeedbackRules: statusFeedbackRules,
-		UpdateStrategy:      updateStrategy,
-		DeletePolicy:        deletePolicy,
+		ResourceName:    work.Name,
+		ResourceID:      string(work.UID),
+		ResourceVersion: resourceVersion,
+		Manifests:       work.Spec.Workload.Manifests,
+		DeleteOption:    work.Spec.DeleteOption,
+		ManifestConfigs: work.Spec.ManifestConfigs,
 	}
 
 	return json.Marshal(manifestPayload)
@@ -124,11 +94,7 @@ func ToAggregatedStatus(work *workv1.ManifestWork) (*payload.ManifestStatus, err
 			Reason:  "Available",
 			Message: fmt.Sprintf("The resouce is available on the cluster %s", work.Namespace),
 		}
-		if len(work.Status.ResourceStatus.Manifests) != 0 && len(work.Status.ResourceStatus.Manifests[0].StatusFeedbacks.Values) != 0 {
-			statusPayload.ResourceStatus = payload.ResourceStatus{
-				Values: work.Status.ResourceStatus.Manifests[0].StatusFeedbacks.Values,
-			}
-		}
+		statusPayload.ResourceStatus = work.Status.ResourceStatus.Manifests
 	case meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkApplied):
 		statusPayload.ResourceCondition = payload.ResourceCondition{
 			Type:    payload.ResourceConditionTypeApplied,

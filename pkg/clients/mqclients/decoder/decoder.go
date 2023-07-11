@@ -6,13 +6,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/work/pkg/clients/mqclients/payload"
-	"open-cluster-management.io/work/pkg/helper"
 )
 
 type Decoder interface {
@@ -54,47 +51,14 @@ func (d *MQTTDecoder) DecodeSpec(data []byte) (*workv1.ManifestWork, error) {
 		return work, nil
 	}
 
-	unstructuredObj := &unstructured.Unstructured{Object: payloadObj.Manifest}
-	manifestData, err := json.Marshal(unstructuredObj.Object)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal content from payload %s, %v", string(data), err)
-	}
-
-	_, gvr, err := helper.BuildResourceMeta(0, unstructuredObj, d.restMapper)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get manifest GVR from payload %s, %v", string(data), err)
-	}
-
-	resourceIdentifier := workv1.ResourceIdentifier{
-		Group:     gvr.Group,
-		Resource:  gvr.Resource,
-		Name:      unstructuredObj.GetName(),
-		Namespace: unstructuredObj.GetNamespace(),
-	}
-
 	work.Spec = workv1.ManifestWorkSpec{
 		Workload: workv1.ManifestsTemplate{
-			Manifests: []workv1.Manifest{
-				{RawExtension: runtime.RawExtension{Raw: manifestData}},
-			},
+			Manifests: payloadObj.Manifests,
 		},
+		DeleteOption:    payloadObj.DeleteOption,
+		ManifestConfigs: payloadObj.ManifestConfigs,
 	}
 
-	if len(payloadObj.DeletePolicy) != 0 {
-		work.Spec.DeleteOption = &workv1.DeleteOption{PropagationPolicy: payloadObj.DeletePolicy}
-	}
-
-	manifestConfigOption := workv1.ManifestConfigOption{
-		ResourceIdentifier: resourceIdentifier,
-	}
-
-	manifestConfigOption.FeedbackRules = payloadObj.StatusFeedbackRules
-
-	if payloadObj.UpdateStrategy != nil {
-		manifestConfigOption.UpdateStrategy = payloadObj.UpdateStrategy
-	}
-
-	work.Spec.ManifestConfigs = []workv1.ManifestConfigOption{manifestConfigOption}
 	return work, nil
 }
 
@@ -126,13 +90,7 @@ func (d *MQTTDecoder) DecodeStatus(data []byte) (*workv1.ManifestWork, error) {
 				},
 			},
 			ResourceStatus: workv1.ManifestResourceStatus{
-				Manifests: []workv1.ManifestCondition{
-					{
-						StatusFeedbacks: workv1.StatusFeedbackResult{
-							Values: payloadObj.ResourceStatus.Values,
-						},
-					},
-				},
+				Manifests: payloadObj.ResourceStatus,
 			},
 		},
 	}
