@@ -12,10 +12,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+
+	"open-cluster-management.io/work/pkg/helper"
 
 	clusterclientset "open-cluster-management.io/api/client/cluster/clientset/versioned"
 	workclientset "open-cluster-management.io/api/client/work/clientset/versioned"
@@ -69,7 +73,7 @@ func newDeployment(name string, replicas int32) *appsv1.Deployment {
 	return deployment
 }
 
-func newManifestWork(namespace, name string, objects ...runtime.Object) *workapiv1.ManifestWork {
+func newManifestWork(namespace, name string, restMapper meta.RESTMapper, objects ...runtime.Object) (*workapiv1.ManifestWork, error) {
 	work := &workapiv1.ManifestWork{}
 
 	work.Namespace = namespace
@@ -83,15 +87,58 @@ func newManifestWork(namespace, name string, objects ...runtime.Object) *workapi
 		"created-for-testing": "true",
 	}
 
-	var manifests []workapiv1.Manifest
-	for _, object := range objects {
+	manifests := make([]workapiv1.Manifest, len(objects))
+	manifestConfigs := make([]workapiv1.ManifestConfigOption, len(objects))
+	for i, object := range objects {
 		manifest := workapiv1.Manifest{}
 		manifest.Object = object
-		manifests = append(manifests, manifest)
-	}
-	work.Spec.Workload.Manifests = manifests
+		manifests[i] = manifest
 
-	return work
+		_, gvr, err := helper.BuildResourceMeta(0, object, restMapper)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get manifest GVR from object %v, %v", object, err)
+		}
+
+		metaObj, ok := object.(metav1.ObjectMetaAccessor)
+		if !ok {
+			return nil, fmt.Errorf("failed to convert runtime Object to ObjectMetaAccessor %v, %v", object, err)
+		}
+
+		manifestConfigs[i] = workapiv1.ManifestConfigOption{
+			ResourceIdentifier: workapiv1.ResourceIdentifier{
+				Group:     gvr.Group,
+				Resource:  gvr.Resource,
+				Name:      metaObj.GetObjectMeta().GetName(),
+				Namespace: metaObj.GetObjectMeta().GetNamespace(),
+			},
+			FeedbackRules: []workapiv1.FeedbackRule{
+				{
+					Type: workapiv1.JSONPathsType,
+					JsonPaths: []workapiv1.JsonPath{
+						{
+							Name: "status",
+							Path: ".status",
+						},
+					},
+				},
+			},
+			UpdateStrategy: &workapiv1.UpdateStrategy{
+				Type: workapiv1.UpdateStrategyTypeUpdate,
+			},
+		}
+	}
+
+	work.Spec = workapiv1.ManifestWorkSpec{
+		Workload: workapiv1.ManifestsTemplate{
+			Manifests: manifests,
+		},
+		ManifestConfigs: manifestConfigs,
+		DeleteOption: &workapiv1.DeleteOption{
+			PropagationPolicy: workapiv1.DeletePropagationPolicyTypeForeground,
+		},
+	}
+
+	return work, nil
 }
 
 func main() {
@@ -115,6 +162,11 @@ func main() {
 	}
 
 	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	restMapper, err := apiutil.NewDynamicRESTMapper(hubRestConfig, apiutil.WithLazyDiscovery)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -206,7 +258,10 @@ func main() {
 	// make sure generated deployment name is not changed for the ManifestWorkReplicaSet
 	mwrsNameHash := fmt.Sprintf("%x", md5.Sum([]byte(name)))
 	deploy := newDeployment("busybox-"+mwrsNameHash, int32(*replicas))
-	work := newManifestWork("cluster1", "work-"+mwrsNameHash, deploy)
+	work, err := newManifestWork("cluster1", "work-"+mwrsNameHash, restMapper, deploy)
+	if err != nil {
+		log.Fatal(err)
+	}
 	mwrs := &workapiv1alpha1.ManifestWorkReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
