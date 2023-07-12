@@ -9,14 +9,14 @@ func TestSplitTopic(t *testing.T) {
 		expectedType string
 	}{
 		{
-			name:         "content resync",
-			topic:        "resync/+/content",
-			expectedType: "content",
+			name:         "manifests resync",
+			topic:        "resync/+/manifests",
+			expectedType: "manifests",
 		},
 		{
-			name:         "status resync",
-			topic:        "resync/clusters/status",
-			expectedType: "status",
+			name:         "manifests status resync",
+			topic:        "resync/clusters/manifestsstatus",
+			expectedType: "manifestsstatus",
 		},
 	}
 

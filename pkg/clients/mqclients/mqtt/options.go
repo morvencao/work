@@ -12,28 +12,28 @@ type MQTTClientOptions struct {
 	ConnEstablishingRetry int
 
 	// topics:
-	// clusters/<cluster-id>/content
-	// clusters/<cluster-id>/status
+	// clusters/<cluster-id>/manifests
+	// clusters/<cluster-id>/manifestsstatus
 	// --------------------------------
-	// resync/<cluster-id>/content
+	// resync/<cluster-id>/manifests
 	// resync/clusters/status
 
-	// hub:   clusters/+/content send the workload to a specified cluster
+	// hub:   clusters/+/manifests send the workload to a specified cluster
 	// spoke: clusters/cluster1/status  send the workload status to a specified cluster
 	PubTopic string
 	PubQoS   int
 
-	// hub:   clusters/+/status         receive the workload status from spoke
-	// spoke: clusters/cluster1/content receive the workload from hub
+	// hub:   clusters/+/manifestsstatus  receive the workload status from spoke
+	// spoke: clusters/cluster1/manifests receive the workload from hub
 	SubTopic string
 	SubQoS   int
 
-	// hub:   resync/clusters/status       request to get workload status from all clusters
-	// spoke: resync/cluster1/content      request to get workload from a specified cluster
+	// hub:   resync/clusters/manifestsstatus request to get workload status from all clusters
+	// spoke: resync/cluster1/manifests       request to get workload from a specified cluster
 	ResyncRequestTopic string
 
-	// hub:   resync/+/content             response to send workload to a specified cluster
-	// spoke: resync/clusters/status       response to send workload status to hub
+	// hub:   resync/+/manifests              response to send workload to a specified cluster
+	// spoke: resync/clusters/manifestsstatus response to send workload status to hub
 	ResyncResponseTopic string
 }
 

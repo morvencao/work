@@ -26,10 +26,10 @@ spec:
           - "--mqtt-broker-host=mosquitto:1883"
           - "--mqtt-username=admin"
           - "--mqtt-password=password"
-          - "--mqtt-sub-topic=clusters/+/status"
-          - "--mqtt-pub-topic=clusters/+/content"
-          - "--mqtt-resync-request-topic=resync/clusters/status"
-          - "--mqtt-resync-response-topic=resync/+/content"
+          - "--mqtt-sub-topic=clusters/+/manifestsstatus"
+          - "--mqtt-pub-topic=clusters/+/manifests"
+          - "--mqtt-resync-request-topic=resync/clusters/manifestsstatus"
+          - "--mqtt-resync-response-topic=resync/+/manifests"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

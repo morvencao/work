@@ -28,10 +28,10 @@ spec:
           - "--mqtt-broker-host=172.18.0.2:31320"
           - "--mqtt-username=admin"
           - "--mqtt-password=password"
-          - "--mqtt-sub-topic=clusters/cluster1/content"
-          - "--mqtt-pub-topic=clusters/cluster1/status"
-          - "--mqtt-resync-request-topic=resync/cluster1/content"
-          - "--mqtt-resync-response-topic=resync/clusters/status"
+          - "--mqtt-sub-topic=clusters/cluster1/manifests"
+          - "--mqtt-pub-topic=clusters/cluster1/manifestsstatus"
+          - "--mqtt-resync-request-topic=resync/cluster1/manifests"
+          - "--mqtt-resync-response-topic=resync/clusters/manifestsstatus"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

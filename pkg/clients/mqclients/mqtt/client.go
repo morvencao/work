@@ -141,12 +141,12 @@ func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) err
 	var payload []byte
 	var err error
 	switch {
-	case resourceType == "content":
+	case resourceType == "manifests":
 		payload, err = c.generateSpecPayload(work)
 		if err != nil {
 			return err
 		}
-	case resourceType == "status":
+	case resourceType == "manifestsstatus":
 		payload, err = c.generateStatusPayload(work)
 		if err != nil {
 			return err
@@ -168,7 +168,7 @@ func (c *MQTTClient) Publish(ctx context.Context, work *workv1.ManifestWork) err
 		return err
 	}
 
-	klog.Infof("Send message [%s] %s", topic, payload)
+	klog.Infof("Send message - topic: [%s] - payload:\n\t%s\n", topic, payload)
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) e
 	klog.Infof("Subscribing to %s, %s", c.options.SubTopic, c.options.ResyncResponseTopic)
 
 	for m := range c.msgChan {
-		klog.Infof("Receive message [%s], payload=%s", m.Topic, string(m.Payload))
+		klog.Infof("Receive message - topic: [%s] - payload:\n\t%s\n", m.Topic, m.Payload)
 		topicType, clusterName, resourceType := splitTopic(m.Topic)
 		if topicType == "resync" {
 			if err := c.resyncManifestworks(ctx, resourceType, clusterName, m); err != nil {
@@ -202,14 +202,14 @@ func (c *MQTTClient) Subscribe(ctx context.Context, receiver watcher.Receiver) e
 
 		var evt *watch.Event
 		switch {
-		case resourceType == "content":
+		case resourceType == "manifests":
 			work, err := c.decoder.DecodeSpec(m.Payload)
 			if err != nil {
 				klog.Warningf("failed to decode payload %s, %v", string(m.Payload), err)
 				continue
 			}
 			evt = c.generateSpecEvent(work)
-		case resourceType == "status":
+		case resourceType == "manifestsstatus":
 			work, err := c.decoder.DecodeStatus(m.Payload)
 			if err != nil {
 				klog.Warningf("failed to decode payload %s, %v", string(m.Payload), err)
@@ -467,7 +467,7 @@ func (c *MQTTClient) generateResyncRequest(resourceType string) []byte {
 	}
 
 	switch {
-	case resourceType == "content":
+	case resourceType == "manifests":
 		resourceVersions := map[string]string{}
 
 		objs := c.store.List()
@@ -482,7 +482,7 @@ func (c *MQTTClient) generateResyncRequest(resourceType string) []byte {
 
 		data, _ := json.Marshal(resourceVersions)
 		return data
-	case resourceType == "status":
+	case resourceType == "manifestsstatus":
 		statusHashes := map[string]string{}
 		objs := c.store.List()
 		for _, obj := range objs {
@@ -509,9 +509,9 @@ func (c *MQTTClient) resyncManifestworks(ctx context.Context, resyncType, cluste
 	}
 
 	switch {
-	case resyncType == "content":
+	case resyncType == "manifests":
 		c.resyncSpecs(ctx, clusterName, m.Payload)
-	case resyncType == "status":
+	case resyncType == "manifestsstatus":
 		c.resyncStatus(ctx, m.Payload)
 	default:
 		klog.Warningf("unsupported resync type %s", resyncType)
