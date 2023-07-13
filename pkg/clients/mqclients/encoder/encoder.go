@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	workv1 "open-cluster-management.io/api/work/v1"
 
 	"open-cluster-management.io/work/pkg/clients/mqclients/payload"
@@ -79,35 +78,24 @@ func ToAggregatedStatus(work *workv1.ManifestWork) (*payload.ManifestStatus, err
 		ResourceVersion: resourceVersion,
 	}
 
-	switch {
-	case !work.DeletionTimestamp.IsZero() && len(work.Finalizers) == 0:
-		statusPayload.ResourceCondition = payload.ResourceCondition{
-			Type:    payload.ResourceConditionTypeDeleted,
-			Status:  "True",
-			Reason:  "Deleted",
-			Message: fmt.Sprintf("The resouce is deleted from the cluster %s", work.Namespace),
+	if !work.DeletionTimestamp.IsZero() && len(work.Finalizers) == 0 {
+		statusPayload.Conditions = []payload.ResourceCondition{
+			{
+				Type:    payload.ResourceConditionTypeDeleted,
+				Status:  "True",
+				Reason:  "Deleted",
+				Message: fmt.Sprintf("The resouce is deleted from the cluster %s", work.Namespace),
+			},
 		}
-	case meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkAvailable):
-		statusPayload.ResourceCondition = payload.ResourceCondition{
-			Type:    payload.ResourceConditionTypeAvailable,
-			Status:  "True",
-			Reason:  "Available",
-			Message: fmt.Sprintf("The resouce is available on the cluster %s", work.Namespace),
-		}
-		statusPayload.ResourceStatus = work.Status.ResourceStatus.Manifests
-	case meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkApplied):
-		statusPayload.ResourceCondition = payload.ResourceCondition{
-			Type:    payload.ResourceConditionTypeApplied,
-			Status:  "True",
-			Reason:  "Applied",
-			Message: fmt.Sprintf("The resouce is applied on the cluster %s", work.Namespace),
-		}
-	default:
-		statusPayload.ResourceCondition = payload.ResourceCondition{
-			Type:    payload.ResourceConditionTypeApplied,
-			Status:  "False",
-			Reason:  "Progressing",
-			Message: fmt.Sprintf("The resouce is in the progress to be applied on the cluster %s", work.Namespace),
+	} else {
+		statusPayload.Conditions = make([]payload.ResourceCondition, len(work.Status.Conditions))
+		for i, cond := range work.Status.Conditions {
+			statusPayload.Conditions[i] = payload.ResourceCondition{
+				Type:    cond.Type,
+				Status:  string(cond.Status),
+				Reason:  cond.Reason,
+				Message: cond.Message,
+			}
 		}
 	}
 

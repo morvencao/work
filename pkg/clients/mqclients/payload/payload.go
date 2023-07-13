@@ -29,7 +29,7 @@ type ManifestStatus struct {
 	ResourceID         string                     `json:"resourceID,omitempty"`
 	ResourceStatusHash string                     `json:"resourceStatusHash,omitempty"`
 	ResourceVersion    int64                      `json:"resourceVersion,omitempty"`
-	ResourceCondition  ResourceCondition          `json:"resourceCondition,omitempty"`
+	Conditions         []ResourceCondition        `json:"conditions,omitempty"`
 	ResourceStatus     []workv1.ManifestCondition `json:"resourceStatus,omitempty"`
 }
 

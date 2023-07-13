@@ -68,6 +68,16 @@ func (d *MQTTDecoder) DecodeStatus(data []byte) (*workv1.ManifestWork, error) {
 		return nil, fmt.Errorf("failed to unmarshal payload %s, %v", string(data), err)
 	}
 
+	conditions := make([]metav1.Condition, len(payloadObj.Conditions))
+	for i, cond := range payloadObj.Conditions {
+		conditions[i] = metav1.Condition{
+			Type:    cond.Type,
+			Status:  metav1.ConditionStatus(cond.Status),
+			Reason:  cond.Reason,
+			Message: cond.Message,
+		}
+	}
+
 	work := &workv1.ManifestWork{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
@@ -81,14 +91,7 @@ func (d *MQTTDecoder) DecodeStatus(data []byte) (*workv1.ManifestWork, error) {
 			},
 		},
 		Status: workv1.ManifestWorkStatus{
-			Conditions: []metav1.Condition{
-				{
-					Type:    payloadObj.ResourceCondition.Type,
-					Status:  metav1.ConditionStatus(payloadObj.ResourceCondition.Status),
-					Reason:  payloadObj.ResourceCondition.Reason,
-					Message: payloadObj.ResourceCondition.Message,
-				},
-			},
+			Conditions: conditions,
 			ResourceStatus: workv1.ManifestResourceStatus{
 				Manifests: payloadObj.ResourceStatus,
 			},
